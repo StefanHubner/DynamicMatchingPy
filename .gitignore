@@ -1,0 +1,6 @@
+dynamicmatching/__pycache__/*
+venv/*
+training_history.csv
+matched_process.pdf
+240716_0500__RES_07_15_adjusted10s.xls
+240716_0500__RES_07_15_adjusted10s_incldummy.xlsx

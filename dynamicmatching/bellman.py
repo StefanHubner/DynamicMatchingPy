@@ -24,7 +24,7 @@ def residuals(ng0, xi, tP, tQ, beta, phi, dev):
     concentrations = torch.tensor([5.5] * (tP.shape[0] * 2)).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
     s0 = dirichlet.sample((ng0, ))[:,:-1]
-    s = s0[torch.all(s0 > 0.015, dim=1)] # saw-shape?
+    s = s0[torch.all(s0 > 0.05, dim=1)] # saw-shape?
     ng = s.shape[0]
     #s.requires_grad = True
 
@@ -79,7 +79,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, dev):
 
     phi = tau(theta, dev)
 
-    epochs = 10000
+    epochs = 20000
     milestones = [epochs // 10, epochs // 4, epochs // 2]
     milestones = []
     optimiser = optim.SGD(xi.parameters(),
