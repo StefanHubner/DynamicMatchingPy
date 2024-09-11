@@ -24,8 +24,7 @@ def residuals(ng0, xi, tP, tQ, beta, phi, dev):
     concentrations = torch.tensor([2.5] * (tP.shape[0] * 2)).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
     s0 = dirichlet.sample((ng0, ))[:,:-1]
-    #s = s0[torch.all(s0 > 0.05, dim=1)] # saw-shape?
-    s = s0
+    s = s0[torch.all(s0 > 0.01, dim=1)] # saw-shape?
     ng = s.shape[0]
     #s.requires_grad = True
 
@@ -121,8 +120,10 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
     # update: now gradient graph is kept and phi is set to requires_grad
 
     if not skiptrain:
-        loss0 = minimise_inner(xi0, theta0, beta, tPs[1], tQ, ng, tau, dev)
-        loss1 = minimise_inner(xi1, theta1, beta, tPs[1], tQ, ng, tau, dev)
+        loss0 = minimise_inner(xi0, theta0, beta, tPs[1], tQs[1],
+                               ng, tau, dev)
+        loss1 = minimise_inner(xi1, theta1, beta, tPs[1], tQs[1],
+                               ng, tau, dev)
     else:
         loss0, loss1 = None, None
 
@@ -145,13 +146,13 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
         tMuM = torch.matmul(tJ(nty0).T, mus)
         tMuF = torch.matmul(mus, tJ(nty0))
         return torch.cat(
-            [torch.matmul(tMuM.view(-1, tPs.shape[2]), p.T),
-             torch.matmul(tMuF.view(-1, tQs.shape[2]), q.T)],
+            [torch.matmul(tMuM.view(-1, p.shape[1]), p.T),
+             torch.matmul(tMuF.view(-1, q.shape[1]), q.T)],
             dim=1)[:,:-1]
 
-    def transition(xi, tP, tQ):
+    def transition(xi, p, q):
         def step(ss):
-            return choices(match(xi, ss), tP, tQ)
+            return choices(match(xi, ss), p, q)
         return step
 
     # calculate sshat from data (marginals of muhat)

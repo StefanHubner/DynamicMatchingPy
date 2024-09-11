@@ -20,13 +20,17 @@ def trans(sex, i):
                           header  = None)
     return trans.fillna(0.0)
 
+def offset(lst, offs):
+    return [(x + offs) for x in lst]
+
 def reduce_to(d1, so, ntypes):
     n = d1.shape[1]
     dims = [2, 2, 2, 3]
     t1 = torch.tensor(d1[:-1, :-1]).flatten().view(dims + dims)
     scol = torch.tensor(d1[:np.prod(dims), -1]).view(dims)
     srow = torch.tensor(d1[-1, :np.prod(dims)]).view(dims)
-    cs = torch.sum(t1, dim=tuple([so, len(dims) + so])).view([ntypes, ntypes])
+    cs = torch.sum(t1, dim=so + offset(so, len(dims))
+                   ).view([ntypes, ntypes])
     sf = torch.sum(scol, dim=so).view([ntypes, 1])
     sm = torch.sum(srow, dim=so).view([1, ntypes])
     byT = torch.cat([
@@ -36,8 +40,6 @@ def reduce_to(d1, so, ntypes):
     return byT.detach().numpy()
 
 def reduce_trans_to(ts, so, ntypes):
-    def offset(lst, offs):
-        return [(x + offs) for x in lst]
     if isinstance(ts, list):
         dt1 = np.column_stack(ts)
     else:
@@ -92,9 +94,22 @@ def tt(i, ntypes, reducer):
     Q = Q_.T
     return (P, Q)
 
+def normalize_tensor(tensor):
+    (_, m, l) = tensor.shape
+    muhat_mf = tensor[:, :(m-1), :(l-1)]
+    muhat_m0 = tensor[:, :(m-1), -1]
+    muhat_0f = tensor[:, -1, :(l-1)]
+
+    nhat = 2 * torch.sum(muhat_mf, dim=(1, 2)) + torch.sum(muhat_m0, dim=1) + torch.sum(muhat_0f, dim=1)
+
+    nhat = nhat.view(-1, 1, 1)
+    return tensor / nhat
+
 def data(red, tsred, ntypes):
     block = couplings()
-    muhat = torch.tensor(block.values).reshape(25, 25, 25)
+    matchhat = torch.tensor(block.values).reshape(25, 25, 25)
+    redmhat = torch.stack([torch.tensor(red(m)) for m in matchhat])
+    muhat = normalize_tensor(redmhat)
     p_pre, q_pre   = tt(1, ntypes, tsred)
     p, q           = tt(2, ntypes, tsred)
     p_post, q_post = tt(3, ntypes, tsred)
