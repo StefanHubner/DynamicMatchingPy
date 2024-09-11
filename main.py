@@ -15,26 +15,30 @@ dev = "cuda" if torch.cuda.is_available() else "cpu"
 data = load_dataset('StefanHubner/DivorceData')
 current = "M"
 
-tP = torch.tensor(data[current]["p"][0], device = dev)
-tQ = torch.tensor(data[current]["q"][0], device = dev)
+# Transition matrices are 3-tensors (0: pre, 1: treat, 2: post, f/m, mf)
+tPs = torch.tensor(data[current]["p"][0], device = dev)
+tQs = torch.tensor(data[current]["q"][0], device = dev)
 tMuHat = torch.tensor(data[current]["couplings"][0], device = dev)
-tMuHat[11,] = tMuHat[12,] # TODO: remove (bodge for parsing error)
 
-hfpath = "../../../HFModels/DutchDivorce/"
+hfpath = "../../../../HFModels/DutchDivorce/"
 load = True
 if load:
-    theta0 = torch.load(hfpath + "theta0" + current + ".pt").to(dev)
-    theta1 = torch.load(hfpath + "theta1" + current + ".pt").to(dev)
-    xi0_sd = torch.load(hfpath + "xi0" + current + ".pt")
-    xi1_sd = torch.load(hfpath + "xi1" + current + ".pt")
+    theta0 = torch.load(hfpath + "theta0" + current + ".pt",
+                        weights_only = True)
+    theta1 = torch.load(hfpath + "theta1" + current + ".pt",
+                        weights_only = True)
+    xi0_sd = torch.load(hfpath + "xi0" + current + ".pt",
+                        weights_only = True)
+    xi1_sd = torch.load(hfpath + "xi1" + current + ".pt",
+                        weights_only = True)
 else:
     theta0 = torch.tensor([-7.7,-7.9,-10.1,-9.4], dtype=torch.float16,
                           device=dev, requires_grad = True)
     theta1 = torch.tensor([-7.7,-7.9,-10.1,-9.4], dtype=torch.float16,
                           device=dev, requires_grad = True)
 
-network0 = Perceptron([64, 64], tP.shape[0], llb = -8)
-network1 = Perceptron([64, 64], tP.shape[0], llb = -8)
+network0 = Perceptron([64, 64], tPs.shape[1], llb = -8)
+network1 = Perceptron([64, 64], tPs.shape[1], llb = -8)
 if load:
     network0.load_state_dict(xi0_sd)
     network1.load_state_dict(xi1_sd)
@@ -48,7 +52,8 @@ treat_idcs = [i for i,t in enumerate(range(1995, 2020)) if 2001 <= t <= 2008]
 # Define the loss calculation function
 def calc_loss():
     optimizer_outer.zero_grad()
-    resid, ssh, sss, l0, l1 = match_moments(xi0, xi1, theta0, theta1, tP, tQ,
+    resid, ssh, sss, l0, l1 = match_moments(xi0, xi1, theta0, theta1,
+                                            tPs, tQs,
                                             tMuHat, ng, dev,
                                             tauMflex, treat_idcs,
                                             skiptrain = False)
@@ -89,7 +94,7 @@ for epoch in range(1, num_epochs + 1):
         perc = int((epoch / num_epochs) * 100)
         sss = sss.cpu().detach().numpy()
         print(f"{TermColours.RED}{perc}% : {loss.item():.4f} : \
-                {par0} {par1} : {TermColours.GREEN}{sss} \
+                {theta0hat} {theta1hat} : {TermColours.GREEN}{sss} \
                 {TermColours.RESET}",
               end='\t', flush=True)
 

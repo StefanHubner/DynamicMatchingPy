@@ -21,10 +21,11 @@ def dr(s, xi):
 def residuals(ng0, xi, tP, tQ, beta, phi, dev):
 
     ndim = tP.shape[0]
-    concentrations = torch.tensor([5.5] * (tP.shape[0] * 2)).to(device = dev)
+    concentrations = torch.tensor([2.5] * (tP.shape[0] * 2)).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
     s0 = dirichlet.sample((ng0, ))[:,:-1]
-    s = s0[torch.all(s0 > 0.05, dim=1)] # saw-shape?
+    #s = s0[torch.all(s0 > 0.05, dim=1)] # saw-shape?
+    s = s0
     ng = s.shape[0]
     #s.requires_grad = True
 
@@ -36,8 +37,8 @@ def residuals(ng0, xi, tP, tQ, beta, phi, dev):
     last = (1 - s[:, ndim:].sum(dim=1) - M.sum(dim = 1)).view(-1, 1)
     F = torch.cat((s[:,ndim:], last), dim = 1)
 
-    mum0 = torch.max(M - torch.sum(muc, dim=2), torch.tensor(10e-3))
-    mu0f = torch.max(F - torch.sum(muc, dim=1), torch.tensor(10e-3))
+    mum0 = torch.max(M - torch.sum(muc, dim=2), torch.tensor(10e-6))
+    mu0f = torch.max(F - torch.sum(muc, dim=1), torch.tensor(10e-6))
     mum = torch.cat((muc, mum0.view(ng, ndim, 1)), dim=2)
     muf = torch.cat((muc, mu0f.view(ng, 1, ndim)), dim=1)
 
@@ -108,7 +109,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, dev):
 
     return loss
 
-def match_moments(xi0, xi1, theta0, theta1, tP, tQ,
+def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
                   tMuHat, ng, dev, tau, treat_idcs, skiptrain = False):
 
     beta = torch.tensor(0.95, device=dev)
@@ -120,8 +121,8 @@ def match_moments(xi0, xi1, theta0, theta1, tP, tQ,
     # update: now gradient graph is kept and phi is set to requires_grad
 
     if not skiptrain:
-        loss0 = minimise_inner(xi0, theta0, beta, tP, tQ, ng, tau, dev)
-        loss1 = minimise_inner(xi1, theta1, beta, tP, tQ, ng, tau, dev)
+        loss0 = minimise_inner(xi0, theta0, beta, tPs[1], tQ, ng, tau, dev)
+        loss1 = minimise_inner(xi1, theta1, beta, tPs[1], tQ, ng, tau, dev)
     else:
         loss0, loss1 = None, None
 
@@ -144,8 +145,8 @@ def match_moments(xi0, xi1, theta0, theta1, tP, tQ,
         tMuM = torch.matmul(tJ(nty0).T, mus)
         tMuF = torch.matmul(mus, tJ(nty0))
         return torch.cat(
-            [torch.matmul(tMuM.view(-1, tP.shape[1]), p.T),
-             torch.matmul(tMuF.view(-1, tQ.shape[1]), q.T)],
+            [torch.matmul(tMuM.view(-1, tPs.shape[2]), p.T),
+             torch.matmul(tMuF.view(-1, tQs.shape[2]), q.T)],
             dim=1)[:,:-1]
 
     def transition(xi, tP, tQ):
@@ -168,9 +169,12 @@ def match_moments(xi0, xi1, theta0, theta1, tP, tQ,
     control_idcs = list(pre) + list(post)
 
     # we recursively define the whole path
-    walker_c = transition(xi0, tP, tQ)
-    walker_t = transition(xi1, tP, tQ)
-    regimes = [(pre, walker_c), (treat_idcs, walker_t), (post, walker_c)]
+    walker_pre = transition(xi0, tPs[0], tQs[0])
+    walker_treat = transition(xi1, tPs[1], tQs[1])
+    walker_post = transition(xi0, tPs[2], tQs[2])
+    regimes = [(pre, walker_pre),
+               (treat_idcs, walker_treat),
+               (post, walker_post)]
 
     ss_star = torch.zeros(nT, ss_cur.shape[1]).to(dev)
 
