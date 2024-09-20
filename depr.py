@@ -1,4 +1,111 @@
 
+def match(xi, ss, dr, dev):
+    muc, _, _ = dr(ss, xi)
+    #mum0s = ss[:,:(nty0-1)]
+    #muf0s = torch.cat((ss[:,-(nty0-2):],
+    #                    1 - ss.sum().view(1, 1)), dim = 1)
+    nty0 = muc.shape[1] + 1
+    mum0, mu0f = calculate_singles(muc, ss)
+    zero = torch.tensor(0.0, device = dev).view(1, 1, 1)
+    mus = torch.cat((torch.cat((muc, mum0.view(1, 1, -1)), dim = 1),
+                     torch.cat((mu0f.view(1, -1, 1), zero), dim=1)),
+                    dim=2)
+    return mus.view(nty0, nty0)
+
+# Define the dr function
+def build_dr(tau, dev):
+    def dr(s, xi):
+        mupar, nu, v = xi(s)
+        mu = torch.vmap(lambda p: tau(p, dev), in_dims=0)(mupar)
+        ng, ndim, ndim = mu.size()
+        return mu.view(ng, ndim, ndim), nu, v
+    return dr
+
+def smooth_max(x, min_value = 10e-09, slope=100):
+    x_stack = torch.stack([x, torch.full_like(x, min_value)])
+    return torch.logsumexp(x_stack * slope, dim=0) / slope
+
+def calculate_singles(muc, s, maxf = smooth_max):
+    ndim = (s.shape[1] + 1) // 2
+    M = s[:, :ndim]
+    last = (1 - s[:, ndim:].sum(dim=1) - M.sum(dim = 1)).view(-1, 1)
+    F = torch.cat((s[:,ndim:], last), dim = 1)
+    mum0 = maxf(M - torch.sum(muc, dim=2))
+    mu0f = maxf(F - torch.sum(muc, dim=1))
+    return mum0, mu0f
+
+
+# Define the residuals function (unconstrained)
+def residuals(ng0, xi, tP, tQ, beta, phi, dr, dev):
+
+    ndim = tP.shape[0]
+    concentrations = torch.tensor([1.5] * (tP.shape[0] * 2)).to(device = dev)
+    dirichlet = torch.distributions.Dirichlet(concentrations)
+    s0 = dirichlet.sample((ng0, ))[:,:-1]
+    s = s0[torch.all(s0 > 0.01, dim=1)]
+    ng = s.shape[0]
+    #s.requires_grad = True
+    maxf = smooth_max # lambda t: torch.max(t, torch.tensor(10e-6))
+
+    muc, _, V = dr(s, xi) # mu's (singles are implied), continuation value
+    #print(muc[0,:,:])
+
+    # Transition of endogenous state
+    mum0, mu0f = calculate_singles(muc, s, maxf)
+    mum = torch.cat((muc, mum0.view(ng, ndim, 1)), dim=2)
+    muf = torch.cat((muc, mu0f.view(ng, 1, ndim)), dim=1)
+
+    mnext = torch.matmul(mum.view(ng, ndim * (ndim + 1)), tP.T)
+    fnext = torch.matmul(muf.view(ng, ndim * (ndim + 1)), tQ.T)
+    snext = torch.cat((mnext, fnext), dim = 1)[:,:-1]
+
+    # Compute next period's value and expected marginal social surplus growth
+    _, _, vnext = dr(snext, xi)
+
+    # the maxf will mess with the regularisation a bit
+    # also it regularises the sparse cases which will lead to a loss offset
+    musafe = maxf(muc)
+    unregularised = torch.multiply(musafe, phi).sum(dim = (1, 2))
+    entropyc = torch.multiply(musafe, torch.log(musafe)).sum(dim = (1, 2))
+    entropym = torch.multiply(mum0, torch.log(mum0)).sum(dim = 1)
+    entropyf = torch.multiply(mu0f, torch.log(mu0f)).sum(dim = 1)
+    # Choo/Siow (2006): 2ec-em-ef, Galichon has 2ec+em+ef (sometimes other)
+    # 2 e_c + e_m + e_f according to my derivations
+    # -entropy is the largest for uniform distribution (all mus equal)
+    # we maximise, thus we punish mus close to 0 or 1 (due to adding up)
+    fun = unregularised - (2 * entropyc + entropym + entropyf)
+
+    # instead of constraining only mu, constrain mu, mum0, mu0f
+    sumL = torch.sum(fun + beta * vnext)
+    grads = autograd_grad(outputs=sumL, inputs=musafe, create_graph=True)
+    gradsm0 = autograd_grad(outputs=sumL, inputs=mum0, create_graph=True)
+    grads0f = autograd_grad(outputs=sumL, inputs=mu0f, create_graph=True)
+    dLdMu = torch.cat((grads[0].view(ng, -1), gradsm0[0], grads0f[0]), dim=1)
+    # allMu = torch.cat((mu, mum0, mu0f), dim=1)
+
+    lambda1, lambda2 = 1.0, 1.0
+    # should singles be regularised?
+    r1 = lambda1 * torch.square(dLdMu) # grads[0].view(ng, -1) vs dLdMu
+    r2 = lambda2 * torch.square((V - fun - beta * vnext).view(ng, 1))
+    # maybe normalise deviations (relative deviations between V and Vnext)?
+
+    resid_v = torch.cat((r1, r2), dim=1)
+    mean_resid_v = torch.mean(resid_v)
+
+    torch.cuda.empty_cache()
+
+    return mean_resid_v
+
+def v(b):
+    def v0(T):
+        if T == 0:
+            return 0
+        else:
+            return 1 + b * v0(T - 1)
+    return v0
+
+[list(map(f, range(1, 10))) for f in map(v, [0.9, 0.8, 0.66, 0.5, 0.25, 0])]
+
 # Assuming you have your matrices as pandas dataframes
 def data(label):
     p = json.load(open("/tmp/tP" + label + ".json", "r"))

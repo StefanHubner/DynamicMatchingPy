@@ -99,9 +99,7 @@ def normalize_tensor(tensor):
     muhat_mf = tensor[:, :(m-1), :(l-1)]
     muhat_m0 = tensor[:, :(m-1), -1]
     muhat_0f = tensor[:, -1, :(l-1)]
-
     nhat = 2 * torch.sum(muhat_mf, dim=(1, 2)) + torch.sum(muhat_m0, dim=1) + torch.sum(muhat_0f, dim=1)
-
     nhat = nhat.view(-1, 1, 1)
     return tensor / nhat
 

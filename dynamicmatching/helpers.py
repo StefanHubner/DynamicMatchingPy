@@ -53,3 +53,4 @@ class ManualLRScheduler:
         for param_group in self.optimizer.param_groups:
             new_lr = max(param_group['lr'] * self.factor, self.min_lr)
             param_group['lr'] = new_lr
+
