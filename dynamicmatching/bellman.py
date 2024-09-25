@@ -58,10 +58,10 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     maskc, mask0 = masks
     phi0 = extend(phi)
     ndim = tP.shape[0]
-    concentrations = torch.tensor([1.5] * (tP.shape[0] * 2)).to(device = dev)
+    concentrations = torch.tensor([1.0] * (tP.shape[0] * 2)).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
     s0 = dirichlet.sample((ng0, ))
-    s = s0[torch.all(s0 > 0.01, dim=1)]
+    s = s0[torch.all(s0 > 0.02, dim=1)]
     ng = s.shape[0]
 
     mus, vcur = xi(s)
@@ -99,7 +99,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
     phi = tau(theta, dev)
 
     epochs = 1000
-    optimiser = optim.Adam(xi.parameters(), weight_decay = 0.01)
+    optimiser = optim.Adam(xi.parameters()) # L2 reg: weight_decay = 0.01)
 
     def calculate_loss():
         optimiser.zero_grad()
@@ -114,8 +114,8 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
         #for name, param in xi.named_parameters():
         #    if torch.isnan(param.grad).any():
         #        pdb.set_trace()
-        # torch.nn.utils.clip_grad_norm_(xi.parameters(), max_norm=1.0)
-        # torch.nn.utils.clip_grad_value_(xi.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(xi.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_value_(xi.parameters(), 1.0)
         return val
 
     for epoch in range(0, epochs):
@@ -138,8 +138,10 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
     # update: now gradient graph is kept and phi is set to requires_grad
 
     if not skiptrain:
-        loss0 = minimise_inner(xi0, theta0, beta, tPs[1], tQs[1],
+        xi0.train()
+        loss0 = minimise_inner(xi0, theta0, beta, tPs[0], tQs[0],
                                ng, tau, masks, dev)
+        xi1.train()
         loss1 = minimise_inner(xi1, theta1, beta, tPs[1], tQs[1],
                                ng, tau, masks, dev)
     else:
@@ -147,11 +149,18 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
 
     nT, nty0, nty0 = tMuHat.size()
 
-    def transition(xi, p, q):
+    def transition_s(xi, p, q):
         def step(ss):
             mus, _ = xi(ss)
             return choices(mus, p, q, dev)
         return step
+    def transition_mu(xi, p, q):
+        def step(mus):
+            ss = choices(mus, p, q, dev)
+            mus, _ = xi(ss)
+            return mus
+        return step
+
 
     # calculate sshat from data (marginals of muhat)
     tMuM = torch.bmm(tJ(nty0, dev).T.repeat(nT, 1, 1), tMuHat)
@@ -165,11 +174,15 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
 
     # initial state
     ss_cur = ss_hat[0, :].view(1, -1)
+    mu_cur = tMuHat[0,:,:]
     pre = range(0, treat_idcs[0])
     post = range(treat_idcs[-1] + 1, nT)
     control_idcs = list(pre) + list(post)
 
     # we recursively define the whole path
+    xi0.eval()
+    xi1.eval()
+    transition = transition_mu
     walker_pre = transition(xi0, tPs[0], tQs[0])
     walker_treat = transition(xi1, tPs[1], tQs[1])
     walker_post = transition(xi0, tPs[2], tQs[2])
@@ -178,16 +191,19 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
                (post, walker_post)]
 
     ss_star = torch.zeros(nT, ss_cur.shape[1]).to(dev)
+    mu_star = torch.zeros(nT, nty0, nty0).to(dev)
 
     for (idcs, walker) in regimes:
         for i in idcs:
-           ss_star[i, ] = ss_cur
-           ss_cur = walker(ss_cur)
+           mu_star[i, :, :] = mu_cur
+           mu_cur = walker(mu_cur)
+           #ss_star[i, ] = ss_cur
+           #ss_cur = walker(ss_cur)
 
-    resid = torch.square(ss_hat - ss_star).sum()
+    resid = torch.square(tMuHat - mu_star).sum()
 
     torch.cuda.empty_cache()
 
-    return (resid, ss_hat, ss_star, loss0, loss1)
+    return (resid, tMuHat, mu_star, loss0, loss1)
 
 

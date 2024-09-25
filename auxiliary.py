@@ -7,7 +7,7 @@
 
 
     # mu* (optimal QE control/decision)
-    mus = dr(ss, xi)
+mus = dr(ss, xi)
 
 
 
