@@ -5,11 +5,11 @@ from torch.autograd import grad as autograd_grad
 import math
 import pdb
 
-from .deeplearning import Perceptron, SinkhornUnmatched, masked_log
-from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler
+from .deeplearning import masked_log
+from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF
 
 def create_closure(xi0, xi1, theta0, theta1, tPs, tQs,
-                   tMuHat, ng, dev, tau, masks, treat_idcs, optim):
+                   tMuHat, ng, dev, tau, masks, treat_idcs, optim, cf):
     # Use a list as a mutable container
     additional_outputs = [None, None, None, None]
     def closure():
@@ -18,7 +18,7 @@ def create_closure(xi0, xi1, theta0, theta1, tPs, tQs,
                                                 tPs, tQs,
                                                 tMuHat, ng, dev,
                                                 tau, masks, treat_idcs,
-                                                skiptrain=False)
+                                                skiptrain=False, cf = cf)
         resid.backward()
         additional_outputs[0] = ssh.detach().cpu()
         additional_outputs[1] = sss.detach().cpu()
@@ -61,7 +61,7 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     concentrations = torch.tensor([1.0] * (tP.shape[0] * 2)).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
     s0 = dirichlet.sample((ng0, ))
-    s = s0[torch.all(s0 > 0.02, dim=1)]
+    s = s0[torch.all(s0 > 0.005, dim=1)] # 0.02 worked
     ng = s.shape[0]
 
     mus, vcur = xi(s)
@@ -99,7 +99,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
     phi = tau(theta, dev)
 
     epochs = 1000
-    optimiser = optim.Adam(xi.parameters()) # L2 reg: weight_decay = 0.01)
+    optimiser = optim.Adam(xi.parameters(), lr = .0001, weight_decay = 0.01)
 
     def calculate_loss():
         optimiser.zero_grad()
@@ -127,7 +127,8 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
     return loss
 
 def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
-                  tMuHat, ng, dev, tau, masks, treat_idcs,skiptrain = False):
+                  tMuHat, ng, dev, tau, masks, treat_idcs,
+                  skiptrain = False, cf = CF.None_):
 
     beta = torch.tensor(0.9, device=dev)
 
@@ -149,17 +150,29 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
 
     nT, nty0, nty0 = tMuHat.size()
 
-    def transition_s(xi, p, q):
+    def transition_s(xi, p, q): # deprecated
         def step(ss):
             mus, _ = xi(ss)
             return choices(mus, p, q, dev)
         return step
-    def transition_mu(xi, p, q):
+    def transition_mu(xi, p, q, cf):
         def step(mus):
             ss = choices(mus, p, q, dev)
             mus, _ = xi(ss)
             return mus
-        return step
+        def step_household(mus):
+            ss = choices(mus, p, q, dev)
+            tM = torch.matmul(torch.matmul(tJ(nty0, dev).T, mus), tiota(nty0, dev))
+            tF = torch.matmul(tiota(nty0, dev).T, torch.matmul(mus, tJ(nty0, dev)))
+            mus, _ = xi(torch.cat([tM.squeeze(), tF.squeeze()], dim=0).view(1, -1))
+            return mus
+        def step_matching(mus):
+            ss = choices(mus, p, q, dev)
+            mus, _ = xi(ss)
+            return mus
+        return {CF.None_: step,
+                CF.HouseholdOnly: step_household,
+                CF.MatchingOnly: step_matching}[cf]
 
 
     # calculate sshat from data (marginals of muhat)
@@ -183,9 +196,9 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
     xi0.eval()
     xi1.eval()
     transition = transition_mu
-    walker_pre = transition(xi0, tPs[0], tQs[0])
-    walker_treat = transition(xi1, tPs[1], tQs[1])
-    walker_post = transition(xi0, tPs[2], tQs[2])
+    walker_pre = transition(xi0, tPs[0], tQs[0], cf)
+    walker_treat = transition(xi1, tPs[1], tQs[1], cf)
+    walker_post = transition(xi0, tPs[2], tQs[2], cf)
     regimes = [(pre, walker_pre),
                (treat_idcs, walker_treat),
                (post, walker_post)]

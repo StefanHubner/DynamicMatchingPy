@@ -20,16 +20,12 @@ def matched_process_plot(ss_hat, ss_star):
     ax.set_ylabel('Value')
     return fig
 
-def matched_process_plot(mu_hat, mu_star, years):
+def matched_process_plot(mu_hat, mu_star, years, cells, couples, singles):
     prh = lambda n: "$\\widehat{\\mu}_{" + n + "}$"
     prs = lambda n: "$\\mu^*_{" + n + "}$"
-    cells = {"nn": (0,0), "ee": (1,1), "ne": (0,1), "cc": (2,2),
-             "n0": (0,3), "e0": (1,3), "0n": (3,0), "0e": (3,1)}
     cls = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'orange']
 
     # Split cells into two groups
-    couples = ["nn", "ee", "ne", "cc"]
-    singles = ["n0", "e0", "0n", "0e"]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(3.5, 7), dpi = 500)
     muh = mu_hat.cpu().detach().numpy()
@@ -61,17 +57,17 @@ def matched_process_plot(mu_hat, mu_star, years):
     plt.tight_layout()
     return fig, ax1, ax2
 
-def create_heatmap_simple(tensor):
+def create_heatmap_simple(tensor, labs):
     data = tensor.detach().cpu().numpy()
     fig, ax = plt.subplots(figsize=(3, 3), dpi = 500)
     sns.heatmap(data, annot=True, fmt=".2f", cmap="Greys",
                 ax=ax, annot_kws={'size': 8}, cbar = False)
-    ax.set_xticklabels(['N', 'E', 'C', '0'])
-    ax.set_yticklabels(['N', 'E', 'C', '0'])
+    ax.set_xticklabels(labs)
+    ax.set_yticklabels(labs)
     fig.tight_layout()
     return fig
 
-def create_heatmap(tensor, x2lab, y2lab):
+def create_heatmap(tensor, x2lab, y2lab, ticklabs):
     data = tensor.detach().cpu().numpy()
     fig, ax = plt.subplots(figsize=(3, 3), dpi=500)
     
@@ -82,10 +78,10 @@ def create_heatmap(tensor, x2lab, y2lab):
     # Move x-axis to the top
     ax.xaxis.tick_top()
     ax.xaxis.set_label_position('top')
-    ax.set_xticklabels(['N', 'E', 'C', '0'], fontsize=8)
+    ax.set_xticklabels(ticklabs, fontsize=8)
     
     # Set y-labels on left
-    ax.set_yticklabels(['N', 'E', 'C', '0'], fontsize=8)
+    ax.set_yticklabels(ticklabs, fontsize=8)
     
     # Create a twin of the y-axis on the right side
     ax2 = ax.twinx()

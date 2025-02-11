@@ -1,3 +1,69 @@
+import pdb
+
+def log_sum_exp_stable(H, a, epsilon, dim):
+    H_shifted = H - torch.min(H, dim=dim, keepdim=True)[0]
+    s = torch.sum(a * torch.exp(-H_shifted / epsilon), dim = dim)
+    return -epsilon * torch.log(s) + torch.min(H, dim=dim)[0]
+
+def mina(H, a, epsilon):
+    return log_sum_exp_stable(H, a, epsilon, dim=0)
+
+def minb(H, b, epsilon):
+    return log_sum_exp_stable(H, b, epsilon, dim=1)
+
+def compute_transport_plan(f, g, a, b, epsilon):
+    K = (f.unsqueeze(1) + g.unsqueeze(0)) / epsilon
+    T = a.unsqueeze(1) + K + b.unsqueeze(0)
+    return torch.exp(T)
+
+
+def sinkhorn_log(A, row_margins, col_margins, iter, masks):
+   eps = 1e-10
+   cmask, smask = masks
+   H = masked_log(A, cmask)
+   a = masked_log(row_margins, smask)
+   b = masked_log(col_margins, smask)
+   f = torch.zeros(H.shape[0], device = H.device)
+   g = torch.zeros(H.shape[1], device = H.device)
+   for _ in range(iter):
+       f = mina(H - g, a, eps)
+       g = minb(H - f, b, eps)
+   return torch.exp(H + f.unsqueeze(1) + g.unsqueeze(0))
+
+
+class Perceptron(nn.Module):
+    def __init__(self, hidden_sizes, ntypes, nout, llb = 0.0):
+        super(Perceptron, self).__init__()
+        layers = []
+        input_size = 2 * ntypes - 1 # adding up
+        self.nout = nout + 1
+        for hidden_size in hidden_sizes:
+            layers.append(nn.Linear(input_size, hidden_size))
+            layers.append(nn.ReLU())
+            input_size = hidden_size
+        layers.append(nn.Linear(input_size, self.nout))
+        self.layers = nn.Sequential(*layers)
+        self.ntypes = ntypes
+        self.lastlayerbias = llb
+        self._initialize_weights()
+    # this makes sure that startup mus are feasiable
+    # in case of nan's adjust this
+    def _initialize_weights(self):
+        gain = nn.init.calculate_gain('relu')
+        for idx, m in enumerate(self.layers):
+            if isinstance(m, nn.Linear):
+                bound = gain * math.sqrt(6 / m.weight.size(1))
+                nn.init.uniform_(m.weight, a=-bound, b=+bound)
+                if m.bias is not None:
+                    #bias for last layer to be inside the feasible region
+                    b = self.lastlayerbias * int(idx == len(self.layers) - 1)
+                    nn.init.constant_(m.bias, b)
+    def forward(self, x):
+        y = self.layers(x)
+        mupar = torch.sigmoid(y[:,:-1])
+        V = torch.exp(y[:,-1]) # torch.exp
+        return (mupar, (), V)
+
 
 def match(xi, ss, dr, dev):
     muc, _, _ = dr(ss, xi)

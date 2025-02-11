@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import argparse
 import io
 import torch
@@ -10,12 +12,13 @@ from torchviz import make_dot
 from PIL import Image
 
 from dynamicmatching.bellman import match_moments, create_closure
-from dynamicmatching.helpers import tauMflex, TermColours
+from dynamicmatching.helpers import tauMflex, tauKMsimple, masksM, masksKM, TermColours, CF
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url
 from dynamicmatching.bellman import minimise_inner, choices
-from dynamicmatching.deeplearning import Perceptron, SinkhornUnmatched, masked_log
+from dynamicmatching.deeplearning import SinkhornM, SinkhornKMsimple, masked_log
 
 st.set_page_config(page_title = "Dynamic Matching")
+
 
 @st.cache_resource
 def load_data(name, dev):
@@ -23,22 +26,26 @@ def load_data(name, dev):
     tPs = torch.tensor(data["p"][0], device = dev)
     tQs = torch.tensor(data["q"][0], device = dev)
     tMuHat = torch.tensor(data["couplings"][0], device = dev)
-    return tPs, tQs, tMuHat
+    years = range(1995, 2021)
+    return tPs, tQs, tMuHat, years
 
-def load_mus(xi0, xi1, t0, t1, tPs, tQs, muh, ng, dev, tau, masks, tis):
+def load_mus(xi0, xi1, t0, t1, tPs, tQs, muh, ng, dev, tau, masks, tis, cf):
         _, muh1, mus, _, _ = match_moments(xi0, xi1, t0, t1,
                                            tPs, tQs, muh, ng,
                                            dev, tau, masks, tis,
-                                           skiptrain = True)
+                                           skiptrain = True, cf = cf)
         return muh1, mus
 
 def main(train = False, noload = False, lbfgs = False, matchingplot = True):
 
     dev = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Load the dataset
-    current, ndim = ("M", 3)
-    tPs, tQs, tMuHat = load_data(current, dev)
+    #Define specification and load appropriate dataset
+    #spec = ("M", 3, SinkhornM, 9, masksM, tauMflex, 4)
+    spec = ("KM", 6, SinkhornKMsimple, 17, masksKM, tauKMsimple, 8)
+    vars, ndim, NN, outdim, masks, tau, thetadim = spec
+    current = NN.__name__
+    tPs, tQs, tMuHat, years = load_data(vars, dev)
 
     hfpath = "../../../../HFModels/DutchDivorce/"
     load = not noload
@@ -52,22 +59,18 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
         xi1_sd = torch.load(hfpath + "xi1" + current + ".pt",
                             weights_only = True)
     else:
-        theta0 = torch.tensor([10, 10, 5 , 10], dtype=torch.float32,
+        theta0 = torch.tensor(thetadim * [0.0], dtype=torch.float32,
                               device=dev, requires_grad = True)
-        theta1 = torch.tensor([10, 5, 5, 10], dtype=torch.float32,
+        theta1 = torch.tensor(thetadim * [0.0], dtype=torch.float32,
+                              device=dev, requires_grad = True)
+        if vars == "KM": # this is from CS09 back of envelope of the mean
+            theta0 = torch.tensor([0.64, 7.17, 2.62, 3.75, 0.32, 4.10, 10.0, 20.0],
+                              device=dev, requires_grad = True)
+            theta1 = torch.tensor([0.64, 7.17, 2.62, 3.75, 0.32, 4.10, 10.0, 20.0],
                               device=dev, requires_grad = True)
 
-    #network0 = Perceptron([64, 64, 64], ndim, len(theta0), llb = -2)
-    #network1 = Perceptron([64, 64, 64], ndim, len(theta1), llb = -2)
-    maskc = [[True, True, False, False],
-             [True, True, False, False],
-             [False, False, True, False],
-             [False, False, False, False]]
-    mask0 = [True, True, False, False]
-    masks = (maskc, mask0)
-    # If masks are provided, log-domain is used. provide None otherwise
-    network0 = SinkhornUnmatched(tauMflex, ndim, 9, masks = None)
-    network1 = SinkhornUnmatched(tauMflex, ndim, 9, masks = None)
+    network0 = NN(tau, ndim, outdim)
+    network1 = NN(tau, ndim, outdim)
 
     if load:
         network0.load_state_dict(xi0_sd)
@@ -77,14 +80,13 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     if lbfgs:
         optim = torch.optim.LBFGS([theta0, theta1],
                                   lr=1, max_iter=100,
-                                  line_search_fn = 'strong_wolfe')
+                                  line_search_zn = 'strong_wolze')
         num_epochs = 100
     else:
-        optim = torch.optim.Adam([theta0, theta1], lr = 1)
+        optim = torch.optim.Adam([theta0, theta1], lr = .1)
         num_epochs = 3000
-    ng = 2**17 # max 2**19 number of draws (uniform gridpoints)
-    treat_idcs = [i for i,t in enumerate(range(1996, 2020))
-                   if 2001 <= t <= 2008]
+    ng = 2**18 # max 2**19 number of draws (uniform gridpoints)
+    treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
 
 
     xi0hat, xi1hat, theta0hat, theta1hat = xi0, xi1, theta0, theta1
@@ -93,8 +95,8 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
 
         closure, add_outputs = create_closure(xi0, xi1, theta0, theta1,
                                               tPs, tQs, tMuHat, ng,
-                                              dev, tauMflex, masks,
-                                              treat_idcs, optim)
+                                              dev, tau, masks,
+                                              treat_idcs, optim, CF.None_)
         torch.set_printoptions(precision = 5, sci_mode=False)
         columns = ['loss', 'l0', 'l1']
         for i in range(theta0.shape[0]):
@@ -140,7 +142,6 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
 
 
     if not train:
-        years = range(1996, 2021)
         xi0, xi1 = xi0hat.cpu(), xi1hat.cpu()
         xi0.eval()
         xi1.eval()
@@ -153,20 +154,23 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                                               "Network"])
         s = st.session_state
         _, mu_star = load_mus(xi0, xi1, theta0, theta1,
-                                   tPs, tQs, mu_hat, ng,
-                                   "cpu", tauMflex, masks, treat_idcs)
-        if 'mn' not in s: s.mn = 0.16
-        if 'me' not in s: s.me = 0.16
-        if 'fn' not in s: s.fn = 0.16
-        if 'fe' not in s: s.fe = 0.16
+                              tPs, tQs, mu_hat, ng,
+                              "cpu", tau, masks, treat_idcs,
+                              cf = CF.None_)
+        if 'mn' not in s: s.mn = 0.20
+        if 'me' not in s: s.me = 0.03
+        if 'zn' not in s: s.zn = 0.16
+        if 'ze' not in s: s.ze = 0.03
+        if 'pkc' not in s: s.pkc = 0.7
+        if 'pknc' not in s: s.pknc = 0.1
         def update_mc():
             s.mc = 0.5 - s.mn - s.me
 
-        def update_fc():
-            s.fc = s.mc
+        def update_zc():
+            s.zc = s.mc
 
-        def update_fe():
-            s.fe = 0.5 - s.fn - s.fc
+        def update_ze():
+            s.ze = 0.5 - s.zn - s.zc
 
         mn = st.sidebar.slider('$M_n$', 0.0, 0.5, step=0.01,
                                key='mn', on_change=update_mc)
@@ -174,47 +178,81 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                                key='me', on_change=update_mc)
         update_mc()
         st.sidebar.slider('$M_c$', 0.0, 0.5, step=0.01,
-                          key='mc', disabled=True, on_change=update_fc)
-        update_fc()
-        fn = st.sidebar.slider('$F_n$', 0.0, 0.5, step=0.01,
-                               key='fn', on_change=update_fe)
-        update_fe()
+                          key='mc', disabled=True, on_change=update_zc)
+        update_zc()
+        zn = st.sidebar.slider('$F_n$', 0.0, 0.5, step=0.01,
+                               key='zn', on_change=update_ze)
+        update_ze()
         st.sidebar.slider('$F_e$', 0.0, 0.5, step=0.01,
-                          key='fe', disabled=True)
+                          key='ze', disabled=True)
         st.sidebar.slider('$F_c$', 0.0, 0.5, step=0.01,
-                          key='fc', disabled=True)
+                          key='zc', disabled=True)
 
-        ss = torch.tensor([[mn, me, s.mc, fn, s.fe, s.fc]], device="cpu")
+        st.sidebar.slider('$P(k|c)$', 0.0, 1.0, step=0.01,
+                          key='pkc', disabled=False)
+        st.sidebar.slider('$P(k|\\neg c)$', 0.0, 1.0, step=0.01,
+                          key='pknc', disabled=False)
+
+        if vars == "KM":
+            pk, pz = s.pknc, 1 - s.pknc
+            ss = torch.tensor([[mn*pz, me*pz, s.mc*(1-s.pkc),
+                                mn*pk, me*pk, s.mc*s.pkc,
+                                zn*pz, s.ze*pz, s.zc*(1-s.pkc),
+                                zn*pk, s.ze*pk, s.zc*s.pkc]],
+                              device="cpu")
+            #ss = torch.kron(torch.ones(1, 2, device = "cpu"), ss)
+            #hdmu = ['zn','kn', 'ze', 'ke','zc', 'kc','0']
+            hdmu = ['zn','ze', 'zc', 'kn','ke', 'kc','0']
+            hds = ['M_{zn}','M_{kn}','M_{ze}','M_{ke}',
+                   'M_{zc}','M_{kc}','F_{zn}','F_{kn}',
+                   'F_{ze}','F_{ke}','F_{zc}','F_{kc}']
+            hds = ['M_{zn}','M_{ze}','M_{zc}','M_{kn}',
+                   'M_{ke}','M_{kc}','F_{zn}','F_{ze}',
+                   'F_{zc}','F_{kn}','F_{ke}','F_{kc}']
+            cells = {"znzn":  (0,0), "zeze": (1,1,), "zczc": (2,2),
+                     "kczc": (5,2), "zckc": (2,5), "kckc": (5,5),
+                     "zn0": (0,6), "0zn": (6,0), 
+                     "knkn": (3,3), "keke": (4,4)}
+            couples = ["znzn", "zeze", "zczc", "knkn", "keke", "kckc"]
+            singles = ["zn0", "0zn"]
+        elif vars == "M":
+            ss = torch.tensor([[mn, me, s.mc, zn, s.ze, s.zc]], device="cpu")
+            hdmu = ['n','e','c','0']
+            hds = ['M_n', 'M_e', 'M_c', 'F_n', 'F_e', 'F_c']
+            cells = {"nn": (0,0), "ee": (1,1), "ne": (0,1), "cc": (2,2),
+                     "n0": (0,3), "e0": (1,3), "0n": (3,0), "0e": (3,1)}
+            couples = ["nn", "ee", "ne", "cc"]
+            singles = ["n0", "e0", "0n", "0e"]
         mus0, v0 = xi0(ss)
-        ssnext0 = choices(mus0, tPs[1], tQs[1], "cpu")
+        ssnext0 = choices(mus0, tPs[0], tQs[0], "cpu") # or 2
         mus1, v1 = xi1(ss)
         ssnext1 = choices(mus1, tPs[1], tQs[1], "cpu")
         phi = lambda theta: torch.cat((
                                   torch.cat((
-                                        tauMflex(theta, "cpu"),
-                                        torch.zeros(3, 1)), dim=1),
-                                  torch.zeros(1, 4)), dim=0)
+                                        tau(theta, "cpu"),
+                                        torch.zeros(ndim, 1)), dim=1),
+                                  torch.zeros(1, ndim+1)), dim=0)
         with sandbox:
             col1, col2 = st.columns(2)
-            hds = ['nt','e','c','0']
             with col1:
                 st.subheader('$\\Phi(\\widehat{\\theta}_0)$')
                 st.write()
                 df = pd.DataFrame(phi(theta0).detach().numpy(),
-                                  index=hds, columns=hds)
+                                  index=hdmu, columns=hdmu)
                 st.dataframe(df)
             with col2:
                 st.subheader('$\\Phi(\\widehat{\\theta}_1)$')
                 df = pd.DataFrame(phi(theta1).detach().numpy(),
-                                  index=hds, columns=hds)
+                                  index=hdmu, columns=hdmu)
                 st.dataframe(df)
             st.subheader('$\\mu_0$ in %')
+            fmarg = ss[0, ndim:2*ndim].detach().numpy().tolist()
+            mmarg = ss[0, 0:ndim].detach().numpy().tolist()
             st.pyplot(create_heatmap(mus0[0]*100,
-                       ["{:.1f}".format(f*100) for f in [fn, s.fe, s.fc, 0]],
-                       ["{:.1f}".format(m*100) for m in [mn, me, s.mc, 0]]
-                                     ), use_container_width=False)
+                       ["{:.1f}".format(f*100) for f in fmarg + [0]],
+                       ["{:.1f}".format(m*100) for m in mmarg + [0]]
+                                     , hdmu), use_container_width=False)
             col1, col2 = st.columns(2)
-            hds = ['M_n', 'M_e', 'M_c', 'F_n', 'F_e', 'F_c']
             with col1:
                 st.subheader('($M_{t+1}^*, F_{t+1}^*)_0 $')
                 df = pd.DataFrame(ssnext0.detach().numpy(),
@@ -231,7 +269,8 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                 st.subheader('$V_1$')
                 st.write(v1.detach().numpy())
         with process:
-            fig, ax1, ax2 = matched_process_plot(mu_hat, mu_star, years)
+            fig, ax1, ax2 = matched_process_plot(mu_hat, mu_star, years,
+                                                 cells, couples, singles)
             st.pyplot(fig, use_container_width=False)
             #fig.savefig("matched_processes.pdf", format="pdf",
             #            bbox_inches="tight")
@@ -243,31 +282,39 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                 st.header("Model: $\\mu^*_t$")
             for (col, mu) in [(col1, mu_hat), (col2, mu_star)]:
                 for i in range(mu.shape[0]):
-                    act = mu[i].detach().numpy()
+                    if vars == "KM":
+                        couples = mu[i,:-1,:-1].reshape(2, 3, 2, 3).sum(axis=(0,2))
+                    else: 
+                        couples = mu[i,:-1,:-1]
                     with col:
-                        pcnc = 2 * act[:-2,:-2].sum()
-                        pcc = 2 * act[-2,-2].sum()
-                        pm, pf = act[-1,:].sum(), act[:,-1].sum()
-                        st.subheader("Year {}".format(years[i]))
+                        pcnc = 2 * couples[:-1,:-1].sum()
+                        pcc = 2 * couples[-1,-1].sum()
+                        pm, pf = mu[i,-1,:].sum(), mu[i,:,-1].sum()
+                        st.subheader("{}".format(years[i]))
                         st.write(("$\\underbrace{{{:.3f}}}_{{P(C_{{\\neg m}})}} + " +
                                   " \\underbrace{{{:.3f}}}_{{P(C_m)}} + " +
                                   " \\underbrace{{{:.3f}}}_{{P(M_0)}} + " +
-                                  " \\underbrace{{{:.3f}}}_{{P(F_0)}} + " +
-                                  " = {{{:.3f}}} $").format(
+                                  " \\underbrace{{{:.3f}}}_{{P(F_0)}} = " +
+                                  " {{{:.3f}}} $").format(
                                         pcnc, pcc, pm, pf,
                                         pcnc + pcc + pm + pf))
-                        st.write(act)
-                        df = pd.DataFrame(act)
-                        st.dataframe(df, hide_index = True)
+                        df = pd.DataFrame(mu[i].detach().numpy(),
+                                          columns = hdmu, index = hdmu)
+                        st.dataframe(df)
+                        df = pd.DataFrame({
+                            'M': mu[i,:-1,:].sum(axis=1).detach().numpy(),
+                            'F': mu[i,:,:-1].sum(axis=0).detach().numpy()
+                            }, index = hdmu[:-1])
+                        st.dataframe(df)
 
         with net:
             st.header("Network 0")
-            dot = make_dot(xi0hat(ss),
-                           params = dict(xi0hat.named_parameters()),
-                           show_attrs=True, show_saved=True)
-            png_data = dot.pipe(format='png')
-            image = Image.open(io.BytesIO(png_data))
-            st.image(image, use_column_width=True)
+            #dot = make_dot(xi(ss),
+            #               params = dict(xi.named_parameters()),
+            #               show_attrs=True, show_saved=True)
+            #png_data = dot.pipe(format='png')
+            #image = Image.open(io.BytesIO(png_data))
+            #st.image(image, use_column_width=True)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,12 @@
+#!/usr/bin/env python
+
 import pandas as pd
 import numpy as np
 from datasets import Dataset, DatasetDict, load_dataset
 import json
 import torch
 
-file_path = './revised_data.xls'
+file_path = './revised_data_november.xls'
 
 def couplings():
     return pd.read_excel(file_path,
@@ -105,7 +107,7 @@ def normalize_tensor(tensor):
 
 def data(red, tsred, ntypes):
     block = couplings()
-    matchhat = torch.tensor(block.values).reshape(25, 25, 25)
+    matchhat = torch.tensor(block.values).reshape(26, 25, 25)
     redmhat = torch.stack([torch.tensor(red(m)) for m in matchhat])
     muhat = normalize_tensor(redmhat)
     p_pre, q_pre   = tt(1, ntypes, tsred)
