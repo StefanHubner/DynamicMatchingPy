@@ -47,7 +47,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     current = NN.__name__
     tPs, tQs, tMuHat, years = load_data(vars, dev)
 
-    hfpath = "../../../../HFModels/DutchDivorce/"
+    hfpath = "./hfdd/"
     load = not noload
     if load:
         theta0 = torch.load(hfpath + "theta0" + current + ".pt",
