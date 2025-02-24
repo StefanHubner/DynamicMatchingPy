@@ -85,7 +85,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     else:
         optim = torch.optim.Adam([theta0, theta1], lr = .1)
         num_epochs = 3000
-    ng = 2**18 # max 2**19 number of draws (uniform gridpoints)
+    ng = 2**20 # max 2**19 number of draws (uniform gridpoints)
     treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
 
 
