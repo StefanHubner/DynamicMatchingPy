@@ -8,13 +8,14 @@ import pdb
 from .deeplearning import masked_log
 from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF
 
-def create_closure(xi0, xi1, theta0, theta1, tPs, tQs,
+def create_closure(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
                    tMuHat, ng, dev, tau, masks, treat_idcs, optim, cf):
     # Use a list as a mutable container
     additional_outputs = [None, None, None, None]
     def closure():
         optim.zero_grad()
-        resid, ssh, sss, l0, l1 = match_moments(xi0, xi1, theta0, theta1,
+        resid, ssh, sss, l0, l1, l2 = match_moments(xi0, xi1, xi2,
+                                                theta0, theta1, theta2,
                                                 tPs, tQs,
                                                 tMuHat, ng, dev,
                                                 tau, masks, treat_idcs,
@@ -24,6 +25,7 @@ def create_closure(xi0, xi1, theta0, theta1, tPs, tQs,
         additional_outputs[1] = sss.detach().cpu()
         additional_outputs[2] = l0.detach().cpu()
         additional_outputs[3] = l1.detach().cpu()
+        additional_outputs[4] = l2.detach().cpu()
         print(resid)
         return resid
     return closure, additional_outputs
@@ -126,7 +128,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
     return loss
 
-def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
+def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
                   tMuHat, ng, dev, tau, masks, treat_idcs,
                   skiptrain = False, cf = CF.None_):
 
@@ -145,8 +147,11 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
         xi1.train()
         loss1 = minimise_inner(xi1, theta1, beta, tPs[1], tQs[1],
                                ng, tau, masks, dev)
+        xi2.train()
+        loss2 = minimise_inner(xi2, theta2, beta, tPs[2], tQs[2],
+                               ng, tau, masks, dev)
     else:
-        loss0, loss1 = None, None
+        loss0, loss1, loss2 = None, None, None
 
     nT, nty0, nty0 = tMuHat.size()
 
@@ -195,10 +200,11 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
     # we recursively define the whole path
     xi0.eval()
     xi1.eval()
+    xi2.eval()
     transition = transition_mu
     walker_pre = transition(xi0, tPs[0], tQs[0], cf)
     walker_treat = transition(xi1, tPs[1], tQs[1], cf)
-    walker_post = transition(xi0, tPs[2], tQs[2], cf)
+    walker_post = transition(xi2, tPs[2], tQs[2], cf)
     regimes = [(pre, walker_pre),
                (treat_idcs, walker_treat),
                (post, walker_post)]
@@ -217,6 +223,6 @@ def match_moments(xi0, xi1, theta0, theta1, tPs, tQs,
 
     torch.cuda.empty_cache()
 
-    return (resid, tMuHat, mu_star, loss0, loss1)
+    return (resid, tMuHat, mu_star, loss0, loss1, loss2)
 
 
