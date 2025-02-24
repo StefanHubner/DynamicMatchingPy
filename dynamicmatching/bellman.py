@@ -11,7 +11,7 @@ from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF
 def create_closure(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
                    tMuHat, ng, dev, tau, masks, treat_idcs, optim, cf):
     # Use a list as a mutable container
-    additional_outputs = [None, None, None, None]
+    additional_outputs = [None, None, None, None, None]
     def closure():
         optim.zero_grad()
         resid, ssh, sss, l0, l1, l2 = match_moments(xi0, xi1, xi2,
