@@ -30,7 +30,7 @@ def load_data(name, dev):
     return tPs, tQs, tMuHat, years
 
 def load_mus(xi0, xi1, xi2, t0, t1, t2, tPs, tQs, muh, ng, dev, tau, masks, tis,cf):
-        _, muh1, mus, _, _ = match_moments(xi0, xi1, xi2, t0, t1, t2,
+        _, muh1, mus, _, _, _ = match_moments(xi0, xi1, xi2, t0, t1, t2,
                                            tPs, tQs, muh, ng,
                                            dev, tau, masks, tis,
                                            skiptrain = True, cf = cf)
@@ -174,7 +174,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                                               "Raw",
                                               "Network"])
         s = st.session_state
-        _, mu_star = load_mus(xi0, xi1, xi2, heta0, theta1, theta2, 
+        _, mu_star = load_mus(xi0, xi1, xi2, theta0, theta1, theta2, 
                               tPs, tQs, mu_hat, ng,
                               "cpu", tau, masks, treat_idcs,
                               cf = CF.None_)
