@@ -257,7 +257,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                                   torch.zeros(1, ndim+1)), dim=0)
         with sandbox:
             cols = st.columns(3)
-            columns_data = zip(cols, [theta0, theta1, theta2], 0:3)
+            columns_data = zip(cols, [theta0, theta1, theta2], range(3))
             for col, theta, idx in columns_data:
                 with col:
                     st.subheader('$\\Phi(\\widehat{{\\theta}}_{})$'.format(idx))
@@ -275,7 +275,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                        ["{:.1f}".format(f*100) for f in fmarg + [0]],
                        ["{:.1f}".format(m*100) for m in mmarg + [0]]
                                      , hdmu), use_container_width=False)
-            columns_data = zip(cols, [ssnext0, ssnext1, ssnext2], [v0, v1, v2], 0:3)
+            columns_data = zip(cols, [ssnext0, ssnext1, ssnext2], [v0, v1, v2], range(3))
             for col, ssnext, v, idx in columns_data:
                 with col:
                     st.subheader('($M_{{t+1}}^*, F_{{t+1}}^*)_{} $'.format(idx))
