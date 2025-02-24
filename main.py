@@ -121,8 +121,8 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
         losshat = torch.tensor(10e30, device=dev)
         for epoch in range(1, num_epochs + 1):
             loss = optim.step(closure)
-            mush, muss, l0, l1 = add_outputs
-            record = [loss.item(), l0.item(), l1.item()]
+            mush, muss, l0, l1, l2 = add_outputs
+            record = [loss.item(), l0.item(), l1.item(), l2.item()]
             par0 = theta0.cpu().detach().numpy().flatten()
             par1 = theta1.cpu().detach().numpy().flatten()
             par2 = theta2.cpu().detach().numpy().flatten()
