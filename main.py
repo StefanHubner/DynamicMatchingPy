@@ -162,6 +162,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
 
 
     if not train:
+
         xi0, xi1, xi2 = xi0hat.cpu(), xi1hat.cpu(), xi2hat.cpu()
         xi0.eval()
         xi1.eval()
@@ -173,11 +174,12 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                                               "Matched Processes",
                                               "Raw",
                                               "Network"])
-        s = st.session_state
         _, mu_star = load_mus(xi0, xi1, xi2, theta0, theta1, theta2, 
                               tPs, tQs, mu_hat, ng,
                               "cpu", tau, masks, treat_idcs,
                               cf = CF.None_)
+
+        s = st.session_state
         if 'mn' not in s: s.mn = 0.20
         if 'me' not in s: s.me = 0.03
         if 'zn' not in s: s.zn = 0.16
