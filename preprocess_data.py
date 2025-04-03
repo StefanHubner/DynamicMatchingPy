@@ -127,3 +127,18 @@ dataset_dict = DatasetDict({
 
 hf_rwtoken = "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"
 dataset_dict.push_to_hub("StefanHubner/DivorceData", token = hf_rwtoken)
+
+class TensorModule(torch.nn.Module):
+    def __init__(self, tensor):
+        super().__init__()
+        self.register_buffer("t", tensor)
+    def forward(self):
+        return self.t
+
+# Assuming tMuHat, tPs, and tQs are already defined tensors.
+for filename, tensor in [("/tmp/tMuHat.pt", tMuHat),
+                         ("/tmp/tPs.pt", tPs),
+                         ("/tmp/tQs.pt", tQs)]:
+    module = TensorModule(tensor)
+    script_module = torch.jit.script(module)
+    torch.jit.save(script_module, filename)
