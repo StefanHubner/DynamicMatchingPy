@@ -71,9 +71,12 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                               device=dev, requires_grad = True)
         if vars == "KM": # this is from GS09 back of envelope of the mean
             boe = [0.64, 7.17, 2.62, 3.75, 0.32, 4.10, 10.0, 20.0]
-            theta0 = torch.tensor(boe, device=dev, requires_grad = True)
-            theta1 = torch.tensor(boe, device=dev, requires_grad = True)
-            theta2 = torch.tensor(boe, device=dev, requires_grad = True)
+            boe1 = [0.77, 6.47, 2.55, 4.19, 0.46, 4.30, 10.0, 20.0]
+            boe2 = [0.77, 7.43, 2.56, 3.84, 0.42, 4.50, 10.0, 20.0]
+            boe3 = [0.50, 7.13, 2.67, 3.56, 0.30, 4.05, 10.0, 20.0]
+            theta0 = torch.tensor(boe1, device=dev, requires_grad = True)
+            theta1 = torch.tensor(boe2, device=dev, requires_grad = True)
+            theta2 = torch.tensor(boe3, device=dev, requires_grad = True)
 
     network0 = NN(tau, ndim, outdim)
     network1 = NN(tau, ndim, outdim)

@@ -100,8 +100,8 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
     phi = tau(theta, dev)
 
-    epochs = 1000
-    optimiser = optim.Adam(xi.parameters(), lr = .0001, weight_decay = 0.01)
+    epochs = 10000
+    optimiser = optim.Adam(xi.parameters(), lr = .0001) #, weight_decay = 0.01)
 
     def calculate_loss():
         optimiser.zero_grad()
@@ -116,8 +116,9 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
         #for name, param in xi.named_parameters():
         #    if torch.isnan(param.grad).any():
         #        pdb.set_trace()
-        torch.nn.utils.clip_grad_norm_(xi.parameters(), max_norm=1.0)
-        torch.nn.utils.clip_grad_value_(xi.parameters(), 1.0)
+        # 2/4/25 tried without clipping
+        #torch.nn.utils.clip_grad_norm_(xi.parameters(), max_norm=1.0)
+        #torch.nn.utils.clip_grad_value_(xi.parameters(), 1.0)
         return val
 
     for epoch in range(0, epochs):
@@ -165,13 +166,13 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
             ss = choices(mus, p, q, dev)
             mus, _ = xi(ss)
             return mus
-        def step_household(mus):
+        def step_household(mus): # not in use
             ss = choices(mus, p, q, dev)
             tM = torch.matmul(torch.matmul(tJ(nty0, dev).T, mus), tiota(nty0, dev))
             tF = torch.matmul(tiota(nty0, dev).T, torch.matmul(mus, tJ(nty0, dev)))
             mus, _ = xi(torch.cat([tM.squeeze(), tF.squeeze()], dim=0).view(1, -1))
             return mus
-        def step_matching(mus):
+        def step_matching(mus): # not in use
             ss = choices(mus, p, q, dev)
             mus, _ = xi(ss)
             return mus
