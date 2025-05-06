@@ -37,6 +37,13 @@ def tauM(par, treat, dev):
         mbasis(3, 2, 2, dev))) # by convention the last one is (c, c)
     return torch.multiply(rs.view(-1, 1, 1), b).sum(dim=0)
 
+# tau for married new prototype (2x2) 
+def tauMproto(par, dev):
+    b = torch.stack((
+        mbasis(2, 0, 0, dev),
+        mbasis(2, 1, 1, dev)))
+    return torch.multiply(par.view(-1, 1, 1), b).sum(dim=0)
+
 # takes 4 parameters
 def tauMflex(par, dev):
     b = torch.stack((
@@ -76,6 +83,11 @@ mask0KM = [True, True, False, True, True, False, False]
 masksKM = (maskcKM, mask0KM)
 masksM = (maskcM, mask0M)
 
+maskcMp = [[True,   False, False],
+           [False,  True , False],
+           [False,  False, False]]
+masks0Mp = [True, True, False]
+masksMproto = (maskcMp, masks0Mp)
 
 
 # Function to minimize fb

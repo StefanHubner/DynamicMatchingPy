@@ -12,10 +12,10 @@ from torchviz import make_dot
 from PIL import Image
 
 from dynamicmatching.bellman import match_moments, create_closure
-from dynamicmatching.helpers import tauMflex, tauKMsimple, masksM, masksKM, TermColours, CF
+from dynamicmatching.helpers import tauMflex, tauKMsimple, masksM, masksKM, masksMproto, TermColours, CF
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url
 from dynamicmatching.bellman import minimise_inner, choices
-from dynamicmatching.deeplearning import SinkhornM, SinkhornKMsimple, masked_log
+from dynamicmatching.deeplearning import SinkhornM, SinkhornKMsimple, SinkhornMproto, masked_log
 
 st.set_page_config(page_title = "Dynamic Matching")
 
@@ -41,8 +41,11 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     dev = "cuda" if torch.cuda.is_available() else "cpu"
 
     #Define specification and load appropriate dataset
+    # outdim = par dim + share of unrest. singles for both sx's + value fct
+    # (name, state dim, net definition, outdim, masks, basis, parameter dim)
     #spec = ("M", 3, SinkhornM, 9, masksM, tauMflex, 4)
-    spec = ("KM", 6, SinkhornKMsimple, 17, masksKM, tauKMsimple, 8)
+    #spec = ("KM", 6, SinkhornKMsimple, 17, masksKM, tauKMsimple, 8)
+    spec = ("Mproto", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2)
     vars, ndim, NN, outdim, masks, tau, thetadim = spec
     current = NN.__name__
     tPs, tQs, tMuHat, years = load_data(vars, dev)
@@ -77,6 +80,10 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
             theta0 = torch.tensor(boe1, device=dev, requires_grad = True)
             theta1 = torch.tensor(boe2, device=dev, requires_grad = True)
             theta2 = torch.tensor(boe3, device=dev, requires_grad = True)
+        elif vars == "Mproto":
+            theta0 = torch.tensor([1.274, 5.856], device=dev, requires_grad=True)
+            theta1 = torch.tensor([1.274, 5.856], device=dev, requires_grad=True)
+            theta2 = torch.tensor([1.274, 5.856], device=dev, requires_grad=True)
 
     network0 = NN(tau, ndim, outdim)
     network1 = NN(tau, ndim, outdim)

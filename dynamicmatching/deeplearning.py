@@ -21,7 +21,6 @@ class Sinkhorn(nn.Module):
         self.sinkhorn = sinkhorn_knopp
         self.num_iterations = num_iterations
         self.layers = self._build_layers(hidden_layers)
-
     def _build_layers(self, hidden_layers):
         layers = []
         prev_dim = self.input_dim
@@ -31,15 +30,12 @@ class Sinkhorn(nn.Module):
             prev_dim = hidden_dim
         layers.append(nn.Linear(prev_dim, self.output_dim))
         return nn.Sequential(*layers)
-
     def forward(self, margins):
         raise NotImplementedError("Subclasses must implement forward method")
-
     def train(self, mode=True):
         super(Sinkhorn, self).train(mode)
         print(f"Training mode: training={self.training}")
         return self
-
     def eval(self):
         super(Sinkhorn, self).eval()
         print(f"Evaluation mode: training={self.training}")
@@ -74,6 +70,34 @@ class SinkhornM(Sinkhorn):
                                    dim=2)
                          ), dim=1)
         return mus, V
+
+class SinkhornMproto(Sinkhorn):
+    def forward(self, margins):
+        M, F = margins[:, 0:2], margins[:, 2:4]
+        pars = self.layers(margins)
+        muc = torch.vmap(lambda p: self.tau(p, pars.device),
+                         in_dims=0)(torch.exp(pars[:, 0:2]))  # positive!
+        sqs = SquashedSigmoid(0.02, 0.98)
+        shm0, shf0 = sqs(pars[:, 2:4]), sqs(pars[:, 4:6])
+        V = torch.exp(pars[:, -1])
+        mucm0, muc0f = M * shm0, F * shf0  # couples
+        mum0, mu0f = M * (1 - shm0), F * (1 - shf0)  # singles
+        stk = torch.cat((muc, mucm0.view(-1, M.shape[1], 1),
+                         muc0f.view(-1, F.shape[1], 1)), dim=2)
+        iter = self.num_iterations if self.training else 1000
+        muc = torch.vmap(lambda p: self.sinkhorn(p[:, 0:2],
+                                                 p[:, 2],
+                                                 p[:, 3],
+                                                 iter), in_dims=0)(stk)
+        mus = torch.cat((torch.cat((muc, mum0.view(-1, M.shape[1], 1)),
+                                   dim=2),
+                         torch.cat((mu0f.view(-1, 1, F.shape[1]),
+                                    torch.zeros(F.shape[0], 1, 1,
+                                                device=pars.device)),
+                                   dim=2)
+                         ), dim=1)
+        return mus, V
+
 
 class SinkhornKMsimple(Sinkhorn):
     def forward(self, margins):
@@ -112,7 +136,6 @@ class SquashedSigmoid(nn.Module):
         super().__init__()
         self.low = low
         self.high = high
-
     def forward(self, x):
         return self.low + (self.high - self.low) * torch.sigmoid(x)
 
@@ -123,7 +146,6 @@ class MaskedLog(torch.autograd.Function):
         epsilon = 1e-10
         result = torch.where(mask, torch.log(input + epsilon), input)
         return result
-
     @staticmethod
     def backward(ctx, grad_output):
         input, mask = ctx.saved_tensors

@@ -45,7 +45,7 @@ def extend(phi):
                                   device = phi.device)), dim=0)
 
 
-def choices(mus, p, q, dev):
+def choices_vectorised(mus, p, q, dev):
     nty0 = mus.shape[1]
     tMuM = torch.matmul(tJ(nty0, dev).T, mus)
     tMuF = torch.matmul(mus, tJ(nty0, dev))
@@ -53,6 +53,14 @@ def choices(mus, p, q, dev):
         [torch.matmul(tMuM.view(-1, p.shape[1]), p.T),
          torch.matmul(tMuF.view(-1, q.shape[1]), q.T)],
         dim=1)
+
+def choices(mus, p, q, dev):
+    tMuM = mus[:,:-1,:]
+    tMuF = mus[:,:,:-1]
+    M = torch.einsum('nij,ijk->nk', tMuM, p)
+    F = torch.einsum('nij,ijk->nk', tMuF, q)
+    return torch.cat([M, F], dim = 1)
+
 
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
@@ -72,8 +80,8 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
 
     unregularised = (mus * phi0).sum(dim=(1,2))
     entropyc = (masked_log(mus, maskc) * mus).sum(dim = (1, 2))
-    entropyf = (masked_log(mus[:,-1,:], mask0)*mus[:,-1,:]).sum(dim=1)
-    entropym = (masked_log(mus[:,:,-1], mask0)*mus[:,:,-1]).sum(dim=1)
+    entropyf = (masked_log(mus[:,-1,:], mask0) * mus[:,-1,:]).sum(dim=1)
+    entropym = (masked_log(mus[:,:,-1], mask0) * mus[:,:,-1]).sum(dim=1)
 
     # Choo/Siow (2006): 2ec-em-ef, Galichon has 2ec+em+ef (sometimes other)
     # 2 e_c + e_m + e_f according to my derivations
@@ -101,7 +109,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
     phi = tau(theta, dev)
 
     epochs = 10000
-    optimiser = optim.Adam(xi.parameters(), lr = .0001) #, weight_decay = 0.01)
+    optimiser = optim.Adam(xi.parameters(), lr = .000001) #, weight_decay = 0.01)
 
     def calculate_loss():
         optimiser.zero_grad()
@@ -181,19 +189,17 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
                 CF.MatchingOnly: step_matching}[cf]
 
 
-    # calculate sshat from data (marginals of muhat)
-    tMuM = torch.bmm(tJ(nty0, dev).T.repeat(nT, 1, 1), tMuHat)
-    tMuF = torch.bmm(tMuHat, tJ(nty0, dev).repeat(nT, 1, 1))
-    tM = torch.bmm(tMuM, tiota(nty0, dev).repeat(nT, 1, 1)
-                   ).view(-1, nty0 - 1)
-    tF = torch.bmm(tiota(nty0, dev).T.repeat(nT, 1, 1), tMuF
-                   ).view(-1, nty0 - 1)
+
+    nmembs = torch.full(tMuHat.shape, 2, device = dev)
+    nmembs[:, :, -1] = nmembs[:, -1, :] = 1
+    tF = (tMuHat * nmembs).sum(1)
+    tM = (tMuHat * nmembs).sum(2)
     ss_hat = torch.cat((tM[:,:].view(-1, nty0-1),
                        tF[:,:].view(-1, nty0-1)), dim=1)
 
     # initial state
     ss_cur = ss_hat[0, :].view(1, -1)
-    mu_cur = tMuHat[0,:,:]
+    mu_cur = tMuHat[0,:,:].unsqueeze(0)
     pre = range(0, treat_idcs[0])
     post = range(treat_idcs[-1] + 1, nT)
     control_idcs = list(pre) + list(post)
