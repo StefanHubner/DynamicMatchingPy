@@ -12,7 +12,7 @@ from torchviz import make_dot
 from PIL import Image
 
 from dynamicmatching.bellman import match_moments, create_closure
-from dynamicmatching.helpers import tauMflex, tauKMsimple, masksM, masksKM, masksMproto, TermColours, CF
+from dynamicmatching.helpers import tauMflex, tauKMsimple, tauMproto, masksM, masksKM, masksMproto, TermColours, CF
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url
 from dynamicmatching.bellman import minimise_inner, choices
 from dynamicmatching.deeplearning import SinkhornM, SinkhornKMsimple, SinkhornMproto, masked_log

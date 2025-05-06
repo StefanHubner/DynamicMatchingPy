@@ -71,7 +71,7 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     concentrations = torch.tensor([1.0] * (tP.shape[0] * 2)).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
     s0 = dirichlet.sample((ng0, ))
-    s = s0[torch.all(s0 > 0.005, dim=1)] # 0.02 worked
+    s = s0[torch.all(s0 > 0.01, dim=1)] # 0.02 worked
     ng = s.shape[0]
 
     mus, vcur = xi(s)
@@ -109,7 +109,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
     phi = tau(theta, dev)
 
     epochs = 10000
-    optimiser = optim.Adam(xi.parameters(), lr = .000001) #, weight_decay = 0.01)
+    optimiser = optim.Adam(xi.parameters(), lr = .0001) #, weight_decay = 0.01)
 
     def calculate_loss():
         optimiser.zero_grad()
