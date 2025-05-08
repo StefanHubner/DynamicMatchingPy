@@ -46,9 +46,12 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     #spec = ("M", 3, SinkhornM, 9, masksM, tauMflex, 4)
     #spec = ("KM", 6, SinkhornKMsimple, 17, masksKM, tauKMsimple, 8)
     spec = ("Mproto", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2)
-    vars, ndim, NN, outdim, masks, tau, thetadim = spec
+    vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim = spec
     current = NN.__name__
     tPs, tQs, tMuHat, years = load_data(vars, dev)
+
+    masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
+             torch.tensor(mask0, dtype=torch.bool, device=dev))
 
     hfpath = "./hfdd/"
     load = not noload
@@ -99,11 +102,11 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     if lbfgs:
         optim = torch.optim.LBFGS([theta0, theta1, theta2],
                                   lr=1, max_iter=100,
-                                  line_search_zn = 'strong_wolze')
+                                  line_search_fn = 'strong_wolze')
         num_epochs = 100
     else:
         optim = torch.optim.Adam([theta0, theta1, theta2], lr = .1)
-        num_epochs = 3000
+        num_epochs = 1000
     ng = 2**19 # max 2**19 number of draws (uniform gridpoints)
     treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
 
