@@ -113,7 +113,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
     phi = tau(theta, dev)
 
-    epochs = 10000
+    epochs = 50000
     optimiser = optim.Adam(xi.parameters(), lr = .00001, weight_decay = 0.01)
 
     def calculate_loss():
