@@ -190,41 +190,44 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                               cf = CF.None_)
 
         s = st.session_state
-        if 'mn' not in s: s.mn = 0.20
-        if 'me' not in s: s.me = 0.03
-        if 'zn' not in s: s.zn = 0.16
-        if 'ze' not in s: s.ze = 0.03
-        if 'pkc' not in s: s.pkc = 0.7
-        if 'pknc' not in s: s.pknc = 0.1
-        def update_mc():
-            s.mc = 0.5 - s.mn - s.me
+        if vars == "M" or vars == "KM":
+            if 'mn' not in s: s.mn = 0.20
+            if 'me' not in s: s.me = 0.03
+            if 'zn' not in s: s.zn = 0.16
+            if 'ze' not in s: s.ze = 0.03
+            if 'pkc' not in s: s.pkc = 0.7
+            if 'pknc' not in s: s.pknc = 0.1
+            def update_mc():
+                s.mc = 0.5 - s.mn - s.me
 
-        def update_zc():
-            s.zc = s.mc
+            def update_zc():
+                s.zc = s.mc
 
-        def update_ze():
-            s.ze = 0.5 - s.zn - s.zc
+            def update_ze():
+                s.ze = 0.5 - s.zn - s.zc
 
-        mn = st.sidebar.slider('$M_n$', 0.0, 0.5, step=0.01,
-                               key='mn', on_change=update_mc)
-        me = st.sidebar.slider('$M_e$', 0.0, 0.5, step=0.01,
-                               key='me', on_change=update_mc)
-        update_mc()
-        st.sidebar.slider('$M_c$', 0.0, 0.5, step=0.01,
-                          key='mc', disabled=True, on_change=update_zc)
-        update_zc()
-        zn = st.sidebar.slider('$F_n$', 0.0, 0.5, step=0.01,
-                               key='zn', on_change=update_ze)
-        update_ze()
-        st.sidebar.slider('$F_e$', 0.0, 0.5, step=0.01,
-                          key='ze', disabled=True)
-        st.sidebar.slider('$F_c$', 0.0, 0.5, step=0.01,
-                          key='zc', disabled=True)
+            mn = st.sidebar.slider('$M_n$', 0.0, 0.5, step=0.01,
+                                   key='mn', on_change=update_mc)
+            me = st.sidebar.slider('$M_e$', 0.0, 0.5, step=0.01,
+                                   key='me', on_change=update_mc)
+            update_mc()
+            st.sidebar.slider('$M_c$', 0.0, 0.5, step=0.01,
+                              key='mc', disabled=True, on_change=update_zc)
+            update_zc()
+            zn = st.sidebar.slider('$F_n$', 0.0, 0.5, step=0.01,
+                                   key='zn', on_change=update_ze)
+            update_ze()
+            st.sidebar.slider('$F_e$', 0.0, 0.5, step=0.01,
+                              key='ze', disabled=True)
+            st.sidebar.slider('$F_c$', 0.0, 0.5, step=0.01,
+                              key='zc', disabled=True)
 
-        st.sidebar.slider('$P(k|c)$', 0.0, 1.0, step=0.01,
-                          key='pkc', disabled=False)
-        st.sidebar.slider('$P(k|\\neg c)$', 0.0, 1.0, step=0.01,
-                          key='pknc', disabled=False)
+            st.sidebar.slider('$P(k|c)$', 0.0, 1.0, step=0.01,
+                              key='pkc', disabled=False)
+            st.sidebar.slider('$P(k|\\neg c)$', 0.0, 1.0, step=0.01,
+                              key='pknc', disabled=False)
+        elif vars == "Mproto":
+            pass
 
         if vars == "KM":
             pk, pz = s.pknc, 1 - s.pknc
@@ -257,7 +260,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
             couples = ["nn", "ee", "ne", "cc"]
             singles = ["n0", "e0", "0n", "0e"]
         mus0, v0 = xi0(ss)
-        ssnext0 = choices(mus0, tPs[0], tQs[0], "cpu") # or 2
+        ssnext0 = choices(mus0, tPs[0], tQs[0], "cpu")
         mus1, v1 = xi1(ss)
         ssnext1 = choices(mus1, tPs[1], tQs[1], "cpu")
         mus2, v2 = xi2(ss)
