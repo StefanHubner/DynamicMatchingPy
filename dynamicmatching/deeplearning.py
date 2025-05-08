@@ -159,9 +159,11 @@ class MaskedLog(torch.autograd.Function):
     #    ctx.save_for_backward(input, mask)
 
 
-def masked_log(tensor, mask_list):
+def masked_log_list(tensor, mask_list):
     mask = torch.tensor(mask_list, dtype=torch.bool, device=tensor.device)
     if mask.shape != tensor.shape:
         mask = mask.unsqueeze(0).expand_as(tensor)
     return MaskedLog.apply(tensor, mask)
 
+def masked_log(tensor, mask):
+    return MaskedLog.apply(tensor, mask)

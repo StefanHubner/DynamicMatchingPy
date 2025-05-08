@@ -91,12 +91,15 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
 
     sumL = torch.sum(fun + beta * vnext)
     grads = autograd_grad(outputs=sumL, inputs=mus, create_graph=True)
+    m2 = torch.cat([torch.cat([maskc[:-1, :-1], mask0[:-1].unsqueeze(1)], dim=1), 
+                    mask0.unsqueeze(0)], dim=0)
+
 
     lambda1, lambda2 = 1.0, 1.0
-    r1 = lambda1 * torch.square(grads[0].view(ng, -1))
+    r1 = lambda1 * torch.square((grads[0] * m2).view(ng, -1))
     r2 = lambda2 * torch.square((vcur - fun - beta * vnext).view(ng, 1))
 
-    resid_v = torch.cat((r1, r2), dim=1)
+    resid_v = torch.cat((r1, r2), dim=1) / r2 # normalisation attempt, includes 1s!
     mean_resid_v = torch.mean(resid_v)
 
     torch.cuda.empty_cache()
@@ -108,7 +111,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
     phi = tau(theta, dev)
 
-    epochs = 2000
+    epochs = 10000
     optimiser = optim.Adam(xi.parameters(), lr = .00001, weight_decay = 0.01)
 
     def calculate_loss():
@@ -175,15 +178,9 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
             mus, _ = xi(ss)
             return mus
         def step_household(mus): # not in use
-            ss = choices(mus, p, q, dev)
-            tM = torch.matmul(torch.matmul(tJ(nty0, dev).T, mus), tiota(nty0, dev))
-            tF = torch.matmul(tiota(nty0, dev).T, torch.matmul(mus, tJ(nty0, dev)))
-            mus, _ = xi(torch.cat([tM.squeeze(), tF.squeeze()], dim=0).view(1, -1))
-            return mus
+            raise NotImplementedError()
         def step_matching(mus): # not in use
-            ss = choices(mus, p, q, dev)
-            mus, _ = xi(ss)
-            return mus
+            raise NotImplementedError()
         return {CF.None_: step,
                 CF.HouseholdOnly: step_household,
                 CF.MatchingOnly: step_matching}[cf]
