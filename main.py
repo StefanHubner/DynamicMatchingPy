@@ -102,7 +102,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     if lbfgs:
         optim = torch.optim.LBFGS([theta0, theta1, theta2],
                                   lr=1, max_iter=100,
-                                  line_search_fn = 'strong_wolze')
+                                  line_search_fn = 'strong_wolfe')
         num_epochs = 100
     else:
         optim = torch.optim.Adam([theta0, theta1, theta2], lr = .1)
