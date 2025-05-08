@@ -94,12 +94,14 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     m2 = torch.cat([torch.cat([maskc[:-1, :-1], mask0[:-1].unsqueeze(1)], dim=1), 
                     mask0.unsqueeze(0)], dim=0)
 
+    margs = torch.cat([mus[:,:-1,:].sum(2), mus[:,:,:-1].sum(1)], dim=1)
 
-    lambda1, lambda2 = 1.0, 1.0
+    lambda1, lambda2, lambda3 = 1.0, 1.0, 1.0
     r1 = lambda1 * torch.square((grads[0] * m2).view(ng, -1))
     r2 = lambda2 * torch.square((vcur - fun - beta * vnext).view(ng, 1))
+    r3 = lambda3 * torch.square(s - margs).view(ng, -1)
 
-    resid_v = torch.cat((r1, r2), dim=1)
+    resid_v = torch.cat((r1, r2, r3), dim=1)
     mean_resid_v = torch.mean(resid_v)
 
     torch.cuda.empty_cache()
