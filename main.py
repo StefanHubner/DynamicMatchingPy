@@ -230,7 +230,26 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
             st.sidebar.slider('$P(k|\\neg c)$', 0.0, 1.0, step=0.01,
                               key='pknc', disabled=False)
         elif vars == "Mproto":
-            pass
+            if 'mu' not in s: s.mu = 0.25
+            if 'fu' not in s: s.fu = 0.25
+
+            def update_mc():
+                s.mc = 0.5 - s.mu
+            def update_fc():
+                s.fc = 0.5 - s.fu
+
+            mu = st.sidebar.slider('$M_u$', 0.0, 0.5, step=0.01,
+                                   key='mu', on_change=update_mc)
+            update_mc()
+            fu = st.sidebar.slider('$F_u$', 0.0, 0.5, step=0.01,
+                                   key='fu', on_change=update_fc)
+            update_fc()
+            ss = torch.tensor([[s.mu, s.mc, s.fu, s.fc]], device="cpu")
+            hdmu = ['u', 'c', '0']
+            hds = ['M_u', 'M_c', 'F_u', 'F_c']
+            cells = {"uu": (0,0), "cc": (1,1), "u0": (0,2), "0u": (2,0) }
+            couples = ["uu", "cc"]
+            singles = ["u0", "0u"]
 
         if vars == "KM":
             pk, pz = s.pknc, 1 - s.pknc
@@ -242,9 +261,6 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
             #ss = torch.kron(torch.ones(1, 2, device = "cpu"), ss)
             #hdmu = ['zn','kn', 'ze', 'ke','zc', 'kc','0']
             hdmu = ['zn','ze', 'zc', 'kn','ke', 'kc','0']
-            hds = ['M_{zn}','M_{kn}','M_{ze}','M_{ke}',
-                   'M_{zc}','M_{kc}','F_{zn}','F_{kn}',
-                   'F_{ze}','F_{ke}','F_{zc}','F_{kc}']
             hds = ['M_{zn}','M_{ze}','M_{zc}','M_{kn}',
                    'M_{ke}','M_{kc}','F_{zn}','F_{ze}',
                    'F_{zc}','F_{kn}','F_{ke}','F_{kc}']

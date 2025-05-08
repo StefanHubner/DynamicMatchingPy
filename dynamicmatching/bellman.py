@@ -99,7 +99,7 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     r1 = lambda1 * torch.square((grads[0] * m2).view(ng, -1))
     r2 = lambda2 * torch.square((vcur - fun - beta * vnext).view(ng, 1))
 
-    resid_v = torch.cat((r1, r2), dim=1) / r2 # normalisation attempt, includes 1s!
+    resid_v = torch.cat((r1, r2), dim=1)
     mean_resid_v = torch.mean(resid_v)
 
     torch.cuda.empty_cache()
