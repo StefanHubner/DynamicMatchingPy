@@ -4,6 +4,7 @@ import torch.optim as optim
 from torch.autograd import grad as autograd_grad
 import math
 import pdb
+import sys
 
 from .deeplearning import masked_log
 from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF, extend
@@ -69,13 +70,24 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     maskc, mask0 = masks
     phi0 = extend(phi)
     ndim = tP.shape[0]
-    concentrations = torch.tensor([1.0] * (tP.shape[0] * 2)).to(device = dev)
+    # concentrations = torch.tensor([1.0] * (tP.shape[0] * 2)).to(device = dev)
+    # dirichlet = torch.distributions.Dirichlet(concentrations)
+    # s0 = dirichlet.sample((ng0, ))
+    # s = s0[torch.all(s0 > 0.02, dim=1)] # 0.02 worked
+    # ng = s.shape[0]
+
+    concentrations = torch.tensor([2.0] * ndim).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
-    s0 = dirichlet.sample((ng0, ))
-    s = s0[torch.all(s0 > 0.02, dim=1)] # 0.02 worked
+    mu_, sigma2_ = torch.tensor(0.0, device=dev), torch.tensor(0.073, device=dev)
+    normal = torch.distributions.Normal(mu_, sigma2_)
+    pm = torch.sigmoid(normal.sample((ng0, ))).reshape(-1, 1)
+    s0 = torch.cat((dirichlet.sample((ng0, )) * pm, dirichlet.sample((ng0, )) * (1-pm)), dim = 1)
+    s = s0[torch.all(s0 > 0.04, dim=1)]
     ng = s.shape[0]
 
     mus, vcur = xi(s)
+    print(mus)
+    sys.exit(1)
     snext = choices(mus, tP, tQ, dev)
     _, vnext = xi(snext)
 

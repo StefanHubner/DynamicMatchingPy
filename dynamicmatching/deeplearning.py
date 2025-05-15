@@ -12,7 +12,7 @@ def sinkhorn_knopp(A, row_margins, col_margins, iter):
         A = A * (col_margins.unsqueeze(0) / (col_sums + epsilon))
     return A
 
-def margin_projection(mu, M, F, iterations=20, epsilon=1e-8):
+def margin_projection_inline(mu, M, F, iterations=20, epsilon=1e-8):
     mu = torch.clamp(mu, min=epsilon)
     for _ in range(iterations):
         row_sums = mu[:-1].sum(dim=1)
@@ -22,6 +22,27 @@ def margin_projection(mu, M, F, iterations=20, epsilon=1e-8):
         col_scaling = F[:-1] / col_sums
         mu[:, :-1] = mu[:, :-1] * col_scaling.view(1, -1)
     return mu
+
+def margin_projection(mu, M, F, iterations=20, epsilon=1e-8):
+    current_mu = torch.clamp(mu, min=epsilon)
+    for _ in range(iterations):
+        # Row scaling for first n-1 rows
+        rows = current_mu[:-1, :]  # Shape [2, 3]
+        row_sums = rows.sum(dim=1, keepdim=True)  # [2, 1]
+        # Proper broadcasting for row scaling
+        row_scaling = (M[:-1].unsqueeze(1) + epsilon) / (row_sums + epsilon)  # [2, 1]
+        scaled_rows = rows * row_scaling  # [2, 3]
+        # Rebuild tensor with scaled rows and original last row
+        new_mu = torch.cat([scaled_rows, current_mu[-1:, :]], dim=0)  # [3, 3]
+        # Column scaling for first n-1 columns
+        cols = new_mu[:, :-1]  # [3, 2]
+        col_sums = cols.sum(dim=0, keepdim=True)  # [1, 2]
+        # Proper broadcasting for column scaling
+        col_scaling = (F[:-1].unsqueeze(0) + epsilon) / (col_sums + epsilon)  # [1, 2]
+        scaled_cols = cols * col_scaling  # [3, 2]
+        # Rebuild final tensor with scaled columns
+        current_mu = torch.cat([scaled_cols, new_mu[:, -1:]], dim=1)  # [3, 3]
+    return current_mu
 
 class Sinkhorn(nn.Module):
     def __init__(self, tau, ndim, output_dim,
@@ -88,6 +109,7 @@ class SinkhornMproto(Sinkhorn):
         super().__init__(*args, **kwargs)
         self.sinkhorn = margin_projection
         self.extend = extend
+        self.num_iterations = 100
 
     def forward(self, margins):
         zs = torch.zeros((margins.shape[0], 1), device = margins.device)
@@ -101,12 +123,12 @@ class SinkhornMproto(Sinkhorn):
         muc[:, -1:, :(F.shape[1]-1)] = muc0f.view(-1, 1, (F.shape[1]-1))
         V = torch.exp(pars[:, -1])
         stk = torch.cat((muc, M.unsqueeze(2), F.unsqueeze(2)), dim=2)
+        print(stk)
         iter = self.num_iterations if self.training else 1000
         mus = torch.vmap(lambda p: self.sinkhorn(p[:, 0:3],
                                                  p[:, 2],
                                                  p[:, 3],
                                                  iter), in_dims=0)(stk)
-        print(mus)
         return mus, V
 
 
