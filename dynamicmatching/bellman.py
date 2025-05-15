@@ -6,7 +6,7 @@ import math
 import pdb
 
 from .deeplearning import masked_log
-from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF
+from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF, extend
 
 def create_closure(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
                    tMuHat, ng, dev, tau, masks, treat_idcs, optim, cf):
@@ -30,19 +30,21 @@ def create_closure(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
         return resid
     return closure, additional_outputs
 
+def check_grad_norm(optimizer):
+    total_norm = 0
+    for param_group in optimizer.param_groups:
+        for p in param_group['params']:
+            if p.grad is not None:
+                total_norm += p.grad.data.norm(2).item() ** 2
+    total_norm = total_norm ** 0.5
+
+    return total_norm
 
 def tJ(dim, dev):
     return torch.eye(dim).to(device=dev)[:, :-1]
 
 def tiota(dim, dev):
     return torch.ones(dim).to(device=dev).view(-1, 1)
-
-def extend(phi):
-    return torch.cat((torch.cat((phi, torch.zeros(phi.shape[0], 1,
-                                                  device = phi.device)
-                                 ), dim=1),
-                      torch.zeros(1, phi.shape[1] + 1,
-                                  device = phi.device)), dim=0)
 
 
 def choices_vectorised(mus, p, q, dev):
@@ -91,12 +93,12 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
 
     sumL = torch.sum(fun + beta * vnext)
     grads = autograd_grad(outputs=sumL, inputs=mus, create_graph=True)
-    m2 = torch.cat([torch.cat([maskc[:-1, :-1], mask0[:-1].unsqueeze(1)], dim=1), 
+    m2 = torch.cat([torch.cat([maskc[:-1, :-1], mask0[:-1].unsqueeze(1)], dim=1),
                     mask0.unsqueeze(0)], dim=0)
 
     margs = torch.cat([mus[:,:-1,:].sum(2), mus[:,:,:-1].sum(1)], dim=1)
 
-    lambda1, lambda2, lambda3 = 1.0, 1.0, 1.0
+    lambda1, lambda2, lambda3 = 1.0, 0.1, 1.0
     r1 = lambda1 * torch.square((grads[0] * m2).view(ng, -1))
     r2 = lambda2 * torch.square((vcur - fun - beta * vnext).view(ng, 1))
     r3 = lambda3 * torch.square(s - margs).view(ng, -1)
@@ -113,8 +115,8 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
     phi = tau(theta, dev)
 
-    epochs = 50000
-    optimiser = optim.Adam(xi.parameters(), lr = .00001, weight_decay = 0.01)
+    epochs = 10000
+    optimiser = optim.Adam(xi.parameters(), lr = .0001) # , weight_decay = 0.01)
 
     def calculate_loss():
         optimiser.zero_grad()
@@ -136,9 +138,13 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
     for epoch in range(0, epochs):
         loss = optimiser.step(calculate_loss)
+        grad_norm = check_grad_norm(optimiser)
         if epoch % (epochs // 100) == 0:
-            print(f"{int((epoch/epochs) * 100)}%: {loss.item():.4f}",
+            print(f"{int((epoch/epochs) * 100)}%: {loss.item():.4f} [{grad_norm:.4f}] ",
                   end='\t', flush = "True")
+        if grad_norm < 1.5 * 1e-1: # seems crude but should be close.. adapt this
+            print(f"Gradient close to zero, done.")
+            break
 
     return loss
 
@@ -230,5 +236,3 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
     torch.cuda.empty_cache()
 
     return (resid, tMuHat, mu_star, loss0, loss1, loss2)
-
-
