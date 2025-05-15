@@ -57,17 +57,17 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     load = not noload
     if load:
         theta0 = torch.load(hfpath + "theta0" + current + ".pt",
-                            weights_only = True)
+                            weights_only = True, map_location=torch.device(dev))
         theta1 = torch.load(hfpath + "theta1" + current + ".pt",
-                            weights_only = True)
+                            weights_only = True, map_location=torch.device(dev))
         theta2 = torch.load(hfpath + "theta2" + current + ".pt",
-                            weights_only = True)
+                            weights_only = True, map_location=torch.device(dev))
         xi0_sd = torch.load(hfpath + "xi0" + current + ".pt",
-                            weights_only = True)
+                            weights_only = True, map_location=torch.device(dev))
         xi1_sd = torch.load(hfpath + "xi1" + current + ".pt",
-                            weights_only = True)
+                            weights_only = True, map_location=torch.device(dev))
         xi2_sd = torch.load(hfpath + "xi2" + current + ".pt",
-                            weights_only = True)
+                            weights_only = True, map_location=torch.device(dev))
     else:
         theta0 = torch.tensor(thetadim * [0.0], dtype=torch.float32,
                               device=dev, requires_grad = True)
