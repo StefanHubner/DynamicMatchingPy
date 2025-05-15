@@ -12,28 +12,14 @@ def sinkhorn_knopp(A, row_margins, col_margins, iter):
         A = A * (col_margins.unsqueeze(0) / (col_sums + epsilon))
     return A
 
-def margin_projection(mu0, M, F, iterations=20, epsilon=1e-3):
-    mu = torch.clamp(mu0, min=epsilon).clone()
-    for _ in range(iterations):
-        mu1 = mu.clone()
-        row_sums = mu[:-1,:].sum(dim=1)
-        row_scaling = M[:-1] / row_sums
-        mu1[:-1,:] = mu[:-1,:] * row_scaling.view(-1, 1)
-        mu2 = mu1.clone()
-        col_sums = mu1[:, :-1].sum(dim=0)
-        col_scaling = F[:-1] / col_sums
-        mu2[:,:-1] = mu1[:,:-1] * col_scaling.view(1, -1)
-        mu = mu2
-    return mu2
-
 def margin_projection(mu, M, F, iterations=20, epsilon=1e-8):
     mu = torch.clamp(mu, min=epsilon)
     for _ in range(iterations):
         row_sums = mu[:-1].sum(dim=1)
-        row_scaling = M / row_sums
+        row_scaling = M[:-1] / row_sums
         mu[:-1] = mu[:-1] * row_scaling.view(-1, 1)
         col_sums = mu[:, :-1].sum(dim=0)
-        col_scaling = F / col_sums
+        col_scaling = F[:-1] / col_sums
         mu[:, :-1] = mu[:, :-1] * col_scaling.view(1, -1)
     return mu
 
@@ -120,7 +106,7 @@ class SinkhornMproto(Sinkhorn):
                                                  p[:, 2],
                                                  p[:, 3],
                                                  iter), in_dims=0)(stk)
-        #print(mus)
+        print(mus)
         return mus, V
 
 
