@@ -12,6 +12,13 @@ class TermColours:
     RESET = "\033[0m"
     GREEN = "\033[32m"
 
+def extend(phi):
+    return torch.cat((torch.cat((phi, torch.zeros(phi.shape[0], 1,
+                                                  device = phi.device)
+                                 ), dim=1),
+                      torch.zeros(1, phi.shape[1] + 1,
+                                  device = phi.device)), dim=0)
+
 # vector basis function
 def vbasis(n, i, dev):
     b = torch.zeros(n, device = dev)

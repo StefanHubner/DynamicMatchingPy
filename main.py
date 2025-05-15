@@ -38,7 +38,14 @@ def load_mus(xi0, xi1, xi2, t0, t1, t2, tPs, tQs, muh, ng, dev, tau, masks, tis,
 
 def main(train = False, noload = False, lbfgs = False, matchingplot = True):
 
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        dev = "cuda"
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        print("Memory Allocated {}, memory rserved {}".format(torch.cuda.memory_allocated(), torch.cuda.memory_reserved()))
+    else:
+        dev = "cpu"
+    torch.autograd.set_detect_anomaly(True)
 
     #Define specification and load appropriate dataset
     # outdim = par dim + share of unrest. singles for both sx's + value fct
@@ -107,12 +114,12 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     else:
         optim = torch.optim.Adam([theta0, theta1, theta2], lr = .1)
         num_epochs = 1000
-    ng = 2**21 # max 2**19 number of draws (uniform gridpoints)
+    ng = 2**20 # max 2**19 number of draws (uniform gridpoints)
     treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
 
 
     xi0hat, xi1hat, xi2hat = xi0, xi1, xi2
-    theta0hat, theta1hat, theta2hat = theta0, theta1, theta2 
+    theta0hat, theta1hat, theta2hat = theta0, theta1, theta2
 
     if train:
 
@@ -147,6 +154,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                 theta0hat = theta0
                 theta1hat = theta1
                 theta2hat = theta2
+                print("Saving tensors")
                 torch.save(theta0hat, hfpath + "theta0" + current + ".pt")
                 torch.save(theta1hat, hfpath + "theta1" + current + ".pt")
                 torch.save(theta2hat, hfpath + "theta2" + current + ".pt")
@@ -156,6 +164,8 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                            hfpath + "xi1" + current + ".pt")
                 torch.save(xi2hat.state_dict(),
                            hfpath + "xi2" + current + ".pt")
+            else:
+                print("previous loss: {} < loss: {}".format(losshat, loss))
             record.extend(par0)
             record.extend(par1)
             record.extend(par2)
@@ -187,7 +197,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                                               "Matched Processes",
                                               "Raw",
                                               "Network"])
-        _, mu_star = load_mus(xi0, xi1, xi2, theta0, theta1, theta2, 
+        _, mu_star = load_mus(xi0, xi1, xi2, theta0, theta1, theta2,
                               tPs, tQs, mu_hat, ng,
                               "cpu", tau, masks, treat_idcs,
                               cf = CF.None_)
@@ -266,7 +276,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                    'F_{zc}','F_{kn}','F_{ke}','F_{kc}']
             cells = {"znzn":  (0,0), "zeze": (1,1,), "zczc": (2,2),
                      "kczc": (5,2), "zckc": (2,5), "kckc": (5,5),
-                     "zn0": (0,6), "0zn": (6,0), 
+                     "zn0": (0,6), "0zn": (6,0),
                      "knkn": (3,3), "keke": (4,4)}
             couples = ["znzn", "zeze", "zczc", "knkn", "keke", "kckc"]
             singles = ["zn0", "0zn"]
@@ -337,7 +347,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                 for i in range(mu.shape[0]):
                     if vars == "KM":
                         couples = mu[i,:-1,:-1].reshape(2, 3, 2, 3).sum(axis=(0,2))
-                    else: 
+                    else:
                         couples = mu[i,:-1,:-1]
                     with col:
                         pcnc = 2 * couples[:-1,:-1].sum()
@@ -386,4 +396,3 @@ if __name__ == "__main__":
                         help="Run this script in streamlit.")
     args = parser.parse_args()
     main(args.train, args.noload, args.lbfgs, args.matchingplot)
-
