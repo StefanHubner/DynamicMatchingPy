@@ -26,6 +26,17 @@ def margin_projection(mu0, M, F, iterations=20, epsilon=1e-3):
         mu = mu2
     return mu2
 
+def margin_projection(mu, M, F, iterations=20, epsilon=1e-8):
+    mu = torch.clamp(mu, min=epsilon)
+    for _ in range(iterations):
+        row_sums = mu[:-1].sum(dim=1)
+        row_scaling = M / row_sums
+        mu[:-1] = mu[:-1] * row_scaling.view(-1, 1)
+        col_sums = mu[:, :-1].sum(dim=0)
+        col_scaling = F / col_sums
+        mu[:, :-1] = mu[:, :-1] * col_scaling.view(1, -1)
+    return mu
+
 class Sinkhorn(nn.Module):
     def __init__(self, tau, ndim, output_dim,
                  hidden_layers=[64, 32, 16], num_iterations=10):
