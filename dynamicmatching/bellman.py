@@ -86,8 +86,6 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     ng = s.shape[0]
 
     mus, vcur = xi(s)
-    print(mus)
-    sys.exit(1)
     snext = choices(mus, tP, tQ, dev)
     _, vnext = xi(snext)
 

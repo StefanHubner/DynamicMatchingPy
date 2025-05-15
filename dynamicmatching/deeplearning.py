@@ -92,8 +92,8 @@ class SinkhornM(Sinkhorn):
                          muc0f.view(-1, F.shape[1], 1)), dim=2)
         iter = self.num_iterations if self.training else 1000
         muc = torch.vmap(lambda p: self.sinkhorn(p[:, 0:2],
+                                                 p[:, 2],
                                                  p[:, 3],
-                                                 p[:, 4],
                                                  iter), in_dims=0)(stk)
         mus = torch.cat((torch.cat((muc, mum0.view(-1, M.shape[1], 1)),
                                    dim=2),
@@ -109,7 +109,7 @@ class SinkhornMproto(Sinkhorn):
         super().__init__(*args, **kwargs)
         self.sinkhorn = margin_projection
         self.extend = extend
-        self.num_iterations = 100
+        self.num_iterations = 10
 
     def forward(self, margins):
         zs = torch.zeros((margins.shape[0], 1), device = margins.device)
@@ -123,12 +123,11 @@ class SinkhornMproto(Sinkhorn):
         muc[:, -1:, :(F.shape[1]-1)] = muc0f.view(-1, 1, (F.shape[1]-1))
         V = torch.exp(pars[:, -1])
         stk = torch.cat((muc, M.unsqueeze(2), F.unsqueeze(2)), dim=2)
-        print(stk)
         iter = self.num_iterations if self.training else 1000
         mus = torch.vmap(lambda p: self.sinkhorn(p[:, 0:3],
-                                                 p[:, 2],
                                                  p[:, 3],
-                                                 iter), in_dims=0)(stk)
+                                                 p[:, 4],
+                                                 iter))(stk)
         return mus, V
 
 

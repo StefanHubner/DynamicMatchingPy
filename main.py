@@ -42,7 +42,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
         dev = "cuda"
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
-        print("Memory Allocated {}, memory rserved {}".format(torch.cuda.memory_allocated(), torch.cuda.memory_reserved()))
+        print("Memory Allocated {}, memory reserved {}".format(torch.cuda.memory_allocated(), torch.cuda.memory_reserved()))
     else:
         dev = "cpu"
     torch.autograd.set_detect_anomaly(True)
