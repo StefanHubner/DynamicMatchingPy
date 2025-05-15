@@ -26,7 +26,6 @@ def create_closure(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
         additional_outputs[2] = l0.detach().cpu()
         additional_outputs[3] = l1.detach().cpu()
         additional_outputs[4] = l2.detach().cpu()
-        print(resid)
         return resid
     return closure, additional_outputs
 
@@ -142,9 +141,9 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
         if epoch % (epochs // 100) == 0:
             print(f"{int((epoch/epochs) * 100)}%: {loss.item():.4f} [{grad_norm:.4f}] ",
                   end='\t', flush = "True")
-        if grad_norm < 1.5 * 1e-1: # seems crude but should be close.. adapt this
-            print(f"Gradient close to zero, done.")
-            break
+        #if grad_norm < 1.5 * 1e-4: # seems crude but should be close.. adapt this
+        #    print(f"Gradient close to zero, done.")
+        #    break
 
     return loss
 

@@ -12,7 +12,8 @@ def sinkhorn_knopp(A, row_margins, col_margins, iter):
         A = A * (col_margins.unsqueeze(0) / (col_sums + epsilon))
     return A
 
-def margin_projection(mu, M, F, maskc, iterations=20, epsilon=1e-8):
+def margin_projection(mu0, M, F, iterations=20, epsilon=1e-3):
+    mu = torch.clamp(mu0, min=epsilon).clone()
     for _ in range(iterations):
         mu1 = mu.clone()
         row_sums = mu[:-1,:].sum(dim=1)
@@ -108,6 +109,7 @@ class SinkhornMproto(Sinkhorn):
                                                  p[:, 2],
                                                  p[:, 3],
                                                  iter), in_dims=0)(stk)
+        #print(mus)
         return mus, V
 
 
