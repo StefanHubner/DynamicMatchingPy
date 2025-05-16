@@ -63,6 +63,12 @@ def choices(mus, p, q, dev):
     F = torch.einsum('nij,ijk->nk', tMuF, q)
     return torch.cat([M, F], dim = 1)
 
+def check_mass(mus, s):
+    ntypes = s.shape[1] // 2
+    f_resid = torch.square(mus.sum(1)[:, :-1] - s[:,ntypes:(2*ntypes)]).sum()
+    m_resid = torch.square(mus.sum(2)[:, :-1] - s[:,0:(ntypes)]).sum()
+    total = torch.round(f_resid + m_resid, decimals = 3).detach()
+    print(f"{TermColours.YELLOW} {total} {TermColours.RESET}", end='')
 
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
@@ -86,6 +92,7 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     ng = s.shape[0]
 
     mus, vcur = xi(s)
+    check_mass(mus, s)
     snext = choices(mus, tP, tQ, dev)
     _, vnext = xi(snext)
 
