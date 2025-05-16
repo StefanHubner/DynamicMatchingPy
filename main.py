@@ -114,10 +114,9 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     else:
         optim = torch.optim.Adam([theta0, theta1, theta2], lr = .1)
         num_epochs = 1000
+
     ng = 2**20 # max 2**19 number of draws (uniform gridpoints)
     treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
-
-
     xi0hat, xi1hat, xi2hat = xi0, xi1, xi2
     theta0hat, theta1hat, theta2hat = theta0, theta1, theta2
 
@@ -352,7 +351,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                     with col:
                         pcnc = 2 * couples[:-1,:-1].sum()
                         pcc = 2 * couples[-1,-1].sum()
-                        pm, pf = mu[i,-1,:].sum(), mu[i,:,-1].sum()
+                        pf, pm = mu[i,-1,:].sum(), mu[i,:,-1].sum()
                         st.subheader("{}".format(years[i]))
                         st.write(("$\\underbrace{{{:.3f}}}_{{P(C_{{\\neg m}})}} + " +
                                   " \\underbrace{{{:.3f}}}_{{P(C_m)}} + " +

@@ -69,19 +69,14 @@ def reduce_trans_to(ts, so, ntypes):
 
 reduce_to_imm_educ_kids = lambda d1: reduce_to(d1, [3], 8)
 reduce_trans_to_imm_educ_kids = lambda ts: reduce_trans_to(ts, [3], 8)
-
 reduce_to_educ_kids = lambda d1: reduce_to(d1, [0, 3], 4)
 reduce_trans_to_educ_kids = lambda ts: reduce_trans_to(ts, [0, 3], 4)
-
 reduce_to_educ_marriage = lambda d1: reduce_to(d1, [0, 2], 6)
 reduce_trans_to_educ_marriage = lambda ts: reduce_trans_to(ts, [0, 2], 6)
-
 reduce_to_kids = lambda d1: reduce_to(d1, [0, 1, 3], 2)
 reduce_trans_to_kids = lambda ts: reduce_trans_to(ts, [0, 1, 3], 2)
-
 reduce_to_marriage = lambda d1: reduce_to(d1, [0, 1, 2], 3)
 reduce_trans_to_marriage = lambda ts: reduce_trans_to(ts, [0, 1, 2], 3)
-
 reduce_to_kids_marriage = lambda d1: reduce_to(d1, [0, 1], 6)
 reduce_trans_to_kids_marriage = lambda ts: reduce_trans_to(ts, [0, 1], 6)
 
@@ -168,12 +163,11 @@ def prototypeM():
     p_pre, q_pre   = tt_tensor(1, ntypes, tsred)
     p, q           = tt_tensor(2, ntypes, tsred)
     p_post, q_post = tt_tensor(3, ntypes, tsred)
-    return Dataset.from_dict({'p': [np.stack([uc_p(p_pre, pn, pe),
-                                              uc_p(p, pn, pe),
-                                              uc_p(p_post, pn, pe)])],
-                              'q': [np.stack([uc_q(q_pre, qn, qe),
-                                              uc_q(q, qn, qe),
-                                              uc_q(q_post, qn, qe)])],
+    p_pre2, q_pre2   = proto_ts(p_pre, q_pre)
+    p2, q2           = proto_ts(p, q)
+    p_post2, q_post2 = proto_ts(p_post, q_post)
+    return Dataset.from_dict({'p': [np.stack([p_pre2, p2, p_post2])],
+                              'q': [np.stack([q_pre2, q2, q_post2])],
                               'couplings': [muhat2]})
 
 
@@ -207,6 +201,35 @@ for filename, tensor in [("/tmp/tMuHat.pt", tMuHat),
     script_module = torch.jit.script(module)
     torch.jit.save(script_module, filename)
 
+def proto_ts(p, q):
+    pnew = torch.zeros((2, 3, 2))
+    qnew = torch.zeros((3, 2, 2))
+    # (*) you don't loose marital status, but you can become unmatched after
+    pnew[0, 0, 0] = p[0, 0, 0] # Pnew(n|nn) = P(n|nn)
+    pnew[0, 0, 1] = p[0, 0, 2] # Pnew(c|nn) = P(c|nn)
+    pnew[0, 1, 0] = 1          # Pnew(n|nc) = 1 (irrel.)
+    pnew[0, 1, 1] = 0          # Pnew(c|nc) = 0 (irrel.)
+    pnew[0, 2, 0] = p[0, 3, 0] # Pnew(n|n0) = P(n|n0)
+    pnew[0, 2, 1] = p[0, 3, 2] # Pnew(c|n0) = P(n|n0)
+    pnew[1, 0, 0] = 0          # Pnew(n|cn) = 0 (irrel.)
+    pnew[1, 0, 1] = 1          # Pnew(c|cn) = 1 (irrel.)
+    pnew[1, 1, 0] = 0          # Pnew(n|cc) = 0 (*)
+    pnew[1, 1, 1] = 1          # Pnew(c|cc) = 0 (*)
+    pnew[1, 2, 0] = p[1, 3, 2] # Pnew(n|c0) = P(c|e0) remarried (repartn'd n/a)
+    pnew[1, 2, 1] = p[1, 3, 1] # Pnew(c|c0) = P(e|e0)
+    qnew[0, 0, 0] = q[0, 0, 0] # Qnew(n|nn) = Q(n|nn)
+    qnew[0, 0, 1] = q[0, 0, 2] # Qnew(c|nn) = Q(c|nn)
+    qnew[0, 1, 0] = 0          # Qnew(n|nc) = 0 (irrel.)
+    qnew[0, 1, 1] = 1          # Qnew(c|nc) = 1 (irrel.)
+    qnew[1, 0, 0] = 1          # Qnew(n|cn) = 1 (irrel.)
+    qnew[1, 0, 1] = 0          # Qnew(c|cn) = 0 (irrel.)
+    qnew[1, 1, 0] = 0          # Qnew(n|cc) = 0 (*)
+    qnew[1, 1, 1] = 1          # Qnew(c|cc) = 1 (*)
+    qnew[2, 0, 0] = q[3, 0, 0] # Qnew(n|0n) = Q(n|0n)
+    qnew[2, 0, 1] = q[3, 0, 2] # Qnew(c|0n) = Q(c|0n)
+    qnew[2, 1, 0] = q[3, 1, 2] # Qnew(n|0c) = Q(c|0c) remarried (repartn'd n/a)
+    qnew[2, 1, 1] = q[3, 1, 1] # Qnew(c|0c) = Q(e|0c)
+    return pnew, qnew
 
 def uc_p(p, p_n, p_e):
     # Initialize new tensor of shape [2,3,2]

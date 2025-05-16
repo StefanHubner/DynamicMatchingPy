@@ -9,8 +9,9 @@ class CF(Enum):
 
 class TermColours:
     RED = "\033[31m"
-    RESET = "\033[0m"
     GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    RESET = "\033[0m"
 
 def extend(phi):
     return torch.cat((torch.cat((phi, torch.zeros(phi.shape[0], 1,
