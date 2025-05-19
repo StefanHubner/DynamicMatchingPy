@@ -70,7 +70,7 @@ def check_mass(mus, s):
     total = (f_resid + m_resid).detach()
     offdiag = (mus.mean(0)[0,1] + mus.mean(0)[1,0]).detach()
     print(f"{TermColours.YELLOW} {total:.3f} {TermColours.RESET}", end='')
-    print(f"{TermColours.RED} {total:.3f} {TermColours.RESET}", end='')
+    print(f"{TermColours.RED} {offdiag:.3f} {TermColours.RESET}", end='')
 
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
@@ -135,7 +135,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
     phi = tau(theta, dev)
 
     epochs = 5000
-    optimiser = optim.Adam(xi.parameters(), lr = .0001) # , weight_decay = 0.01)
+    optimiser = optim.Adam(xi.parameters(), lr = .001) # , weight_decay = 0.01)
 
     def calculate_loss():
         optimiser.zero_grad()
