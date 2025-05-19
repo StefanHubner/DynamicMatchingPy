@@ -116,7 +116,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
         optim = torch.optim.Adam([theta0, theta1, theta2], lr = .1)
         num_epochs = 1000
 
-    ng = 2**20 # max 2**19 number of draws (uniform gridpoints)
+    ng = 2**19 # max 2**19 number of draws (uniform gridpoints)
     treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
     xi0hat, xi1hat, xi2hat = xi0, xi1, xi2
     theta0hat, theta1hat, theta2hat = theta0, theta1, theta2

@@ -67,8 +67,10 @@ def check_mass(mus, s):
     ntypes = s.shape[1] // 2
     f_resid = torch.square(mus.sum(1)[:, :-1] - s[:,ntypes:(2*ntypes)]).sum()
     m_resid = torch.square(mus.sum(2)[:, :-1] - s[:,0:(ntypes)]).sum()
-    total = torch.round(f_resid + m_resid, decimals = 3).detach()
-    print(f"{TermColours.YELLOW} {total} {TermColours.RESET}", end='')
+    total = (f_resid + m_resid).detach()
+    offdiag = (mus.mean(0)[0,1] + mus.mean(0)[1,0]).detach()
+    print(f"{TermColours.YELLOW} {total:.3f} {TermColours.RESET}", end='')
+    print(f"{TermColours.RED} {total:.3f} {TermColours.RESET}", end='')
 
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
@@ -132,7 +134,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
     phi = tau(theta, dev)
 
-    epochs = 10000
+    epochs = 5000
     optimiser = optim.Adam(xi.parameters(), lr = .0001) # , weight_decay = 0.01)
 
     def calculate_loss():

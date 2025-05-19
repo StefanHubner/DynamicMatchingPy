@@ -46,8 +46,8 @@ def margin_projection(mu, M, F, iterations=20, epsilon=1e-8, tol=1e-6):
         fproj = current_mu[:, :-1].sum(dim=0)
         row_error = torch.sum(torch.square(mproj - M[:-1]))
         col_error = torch.sum(torch.square(fproj - F[:-1]))
-        if error < tol:
-            break
+        #if (row_error + col_error) < tol:
+        #    break
     return current_mu
 
 class Sinkhorn(nn.Module):
@@ -85,7 +85,7 @@ class SinkhornMproto(Sinkhorn):
         super().__init__(*args, **kwargs)
         self.sinkhorn = margin_projection
         self.extend = extend
-        self.num_iterations = 40
+        self.num_iterations = 25
 
     def forward(self, margins):
         zs = torch.zeros((margins.shape[0], 1), device = margins.device)
