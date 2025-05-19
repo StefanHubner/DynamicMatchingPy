@@ -23,7 +23,7 @@ def margin_projection_inline(mu, M, F, iterations=20, epsilon=1e-8):
         mu[:, :-1] = mu[:, :-1] * col_scaling.view(1, -1)
     return mu
 
-def margin_projection(mu, M, F, iterations=20, epsilon=1e-8):
+def margin_projection(mu, M, F, iterations=20, epsilon=1e-8, tol=1e-6):
     current_mu = mu # torch.clamp(mu, min=epsilon)
     for _ in range(iterations):
         # Row scaling for first n-1 rows
@@ -39,9 +39,15 @@ def margin_projection(mu, M, F, iterations=20, epsilon=1e-8):
         col_sums = cols.sum(dim=0, keepdim=True)
         # Proper broadcasting for column scaling
         col_scaling = F[:-1].unsqueeze(0) / (col_sums + epsilon)
-        scaled_cols = cols * col_scaling  # [3, 2]
+        scaled_cols = cols * col_scaling
         # Rebuild final tensor with scaled columns
         current_mu = torch.cat([scaled_cols, new_mu[:, -1:]], dim=1)
+        mproj = current_mu[:-1, :].sum(dim=1)
+        fproj = current_mu[:, :-1].sum(dim=0)
+        row_error = torch.sum(torch.square(mproj - M[:-1]))
+        col_error = torch.sum(torch.square(fproj - F[:-1]))
+        if error < tol:
+            break
     return current_mu
 
 class Sinkhorn(nn.Module):
