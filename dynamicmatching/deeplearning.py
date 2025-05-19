@@ -24,24 +24,24 @@ def margin_projection_inline(mu, M, F, iterations=20, epsilon=1e-8):
     return mu
 
 def margin_projection(mu, M, F, iterations=20, epsilon=1e-8):
-    current_mu = torch.clamp(mu, min=epsilon)
+    current_mu = mu # torch.clamp(mu, min=epsilon)
     for _ in range(iterations):
         # Row scaling for first n-1 rows
-        rows = current_mu[:-1, :]  # Shape [2, 3]
-        row_sums = rows.sum(dim=1, keepdim=True)  # [2, 1]
+        rows = current_mu[:-1, :]
+        row_sums = rows.sum(dim=1, keepdim=True)
         # Proper broadcasting for row scaling
-        row_scaling = (M[:-1].unsqueeze(1) + epsilon) / (row_sums + epsilon)  # [2, 1]
-        scaled_rows = rows * row_scaling  # [2, 3]
+        row_scaling = M[:-1].unsqueeze(1) / (row_sums + epsilon)
+        scaled_rows = rows * row_scaling
         # Rebuild tensor with scaled rows and original last row
-        new_mu = torch.cat([scaled_rows, current_mu[-1:, :]], dim=0)  # [3, 3]
+        new_mu = torch.cat([scaled_rows, current_mu[-1:, :]], dim=0)
         # Column scaling for first n-1 columns
-        cols = new_mu[:, :-1]  # [3, 2]
-        col_sums = cols.sum(dim=0, keepdim=True)  # [1, 2]
+        cols = new_mu[:, :-1]
+        col_sums = cols.sum(dim=0, keepdim=True)
         # Proper broadcasting for column scaling
-        col_scaling = (F[:-1].unsqueeze(0) + epsilon) / (col_sums + epsilon)  # [1, 2]
+        col_scaling = F[:-1].unsqueeze(0) / (col_sums + epsilon)
         scaled_cols = cols * col_scaling  # [3, 2]
         # Rebuild final tensor with scaled columns
-        current_mu = torch.cat([scaled_cols, new_mu[:, -1:]], dim=1)  # [3, 3]
+        current_mu = torch.cat([scaled_cols, new_mu[:, -1:]], dim=1)
     return current_mu
 
 class Sinkhorn(nn.Module):
