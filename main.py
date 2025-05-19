@@ -38,6 +38,7 @@ def load_mus(xi0, xi1, xi2, t0, t1, t2, tPs, tQs, muh, ng, dev, tau, masks, tis,
 
 def main(train = False, noload = False, lbfgs = False, matchingplot = True):
 
+    torch.set_printoptions(precision=4, sci_mode=False)
     if torch.cuda.is_available():
         dev = "cuda"
         torch.cuda.synchronize()
