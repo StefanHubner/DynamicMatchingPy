@@ -79,7 +79,7 @@ class SinkhornMproto(Sinkhorn):
         super().__init__(*args, **kwargs)
         self.sinkhorn = margin_projection
         self.extend = extend
-        self.num_iterations = 10
+        self.num_iterations = 40
 
     def forward(self, margins):
         zs = torch.zeros((margins.shape[0], 1), device = margins.device)
