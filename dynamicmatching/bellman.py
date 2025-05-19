@@ -65,12 +65,12 @@ def choices(mus, p, q, dev):
 
 def check_mass(mus, s):
     ntypes = s.shape[1] // 2
-    f_resid = torch.square(mus.sum(1)[:, :-1] - s[:,ntypes:(2*ntypes)]).sum()
-    m_resid = torch.square(mus.sum(2)[:, :-1] - s[:,0:(ntypes)]).sum()
-    total = (f_resid + m_resid).detach()
+    f_resid = torch.square(mus.sum(1)[:, :-1] - s[:,ntypes:(2*ntypes)]).mean()
+    m_resid = torch.square(mus.sum(2)[:, :-1] - s[:,0:(ntypes)]).mean()
+    total = torch.sqrt(0.5 * f_resid + 0.5 * m_resid).detach()
     offdiag = (mus.mean(0)[0,1] + mus.mean(0)[1,0]).detach()
-    print(f"{TermColours.YELLOW} {total:.3f} {TermColours.RESET}", end='')
-    print(f"{TermColours.RED} {offdiag:.3f} {TermColours.RESET}", end='')
+    print(f"{TermColours.YELLOW} {total:.2f} {TermColours.RESET}", end='')
+    print(f"{TermColours.CYAN} {offdiag:.2f} {TermColours.RESET}", end='')
 
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
@@ -144,7 +144,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
             if not val.isnan():
                 break
             else:
-                print(f"{TermColours.RED}.{TermColours.RESET}", end='')
+                print(f"{TermColours.BRIGHT_RED}.{TermColours.RESET}", end='')
         val.backward(retain_graph=True)
 
         #for name, param in xi.named_parameters():
