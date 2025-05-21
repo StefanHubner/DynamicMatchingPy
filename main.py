@@ -173,7 +173,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
             if True: # loss <= losshat:
                 perc = int((epoch / num_epochs) * 100)
                 muss = muss.cpu().detach().numpy()
-                print(f"{TermColours.RED}{perc}% : {loss.item():.4f} : \
+                print(f"{TermColours.BRIGHT_RED}{perc}% : {loss.item():.4f} : \
                         {theta0hat} {theta1hat} {theta2hat}: \
                         {TermColours.GREEN}{muss} \
                         {TermColours.RESET}",
