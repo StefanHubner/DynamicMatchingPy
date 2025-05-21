@@ -105,10 +105,10 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     entropym = (masked_log(mus[:,:,-1], mask0) * mus[:,:,-1]).sum(dim=1)
 
     # Choo/Siow (2006): 2ec-em-ef, Galichon has 2ec+em+ef (sometimes other)
-    # 2 e_c + e_m + e_f according to my derivations
+    # 2 e_c - e_m - e_f is the one consistent with dE/dmu = Phi
     # -entropy is the largest for uniform distribution (all mus equal)
     # we maximise, thus we punish mus close to 0 or 1 (due to adding up)
-    fun = unregularised - (2 * entropyc + entropym + entropyf)
+    fun = unregularised - (2 * entropyc - entropym - entropyf)
 
     sumL = torch.sum(fun + beta * vnext)
     grads = autograd_grad(outputs=sumL, inputs=mus, create_graph=True)

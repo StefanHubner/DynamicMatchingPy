@@ -37,7 +37,7 @@ def matched_process_plot(mu_hat, mu_star, years, cells, couples, singles):
             i, j = cells[k]
             line, = ax.plot(years, muh[:,i,j], label=f'{prh(k)}',
                             color=cls[idx], linestyle='-', linewidth=0.75)
-            ax.plot(years, mus[:,i,j], label=f'{prs(k)}',
+            ax.plot(years[1:], mus[1:,i,j], label=f'{prs(k)}',
                     color=cls[idx], linestyle='--', linewidth=0.75)
             ax.axvspan(2001, 2008, color='grey', alpha=0.1, linewidth=0)
             handles.append(line)

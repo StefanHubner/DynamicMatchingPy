@@ -92,9 +92,9 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
             theta1 = torch.tensor(boe2, device=dev, requires_grad = True)
             theta2 = torch.tensor(boe3, device=dev, requires_grad = True)
         elif vars == "Mproto":
-            theta0 = torch.tensor([1.274, 5.856], device=dev, requires_grad=True)
-            theta1 = torch.tensor([1.274, 5.856], device=dev, requires_grad=True)
-            theta2 = torch.tensor([1.274, 5.856], device=dev, requires_grad=True)
+            theta0 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
+            theta1 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
+            theta2 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
 
     network0 = NN(tau, ndim, outdim)
     network1 = NN(tau, ndim, outdim)
@@ -257,9 +257,10 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
             ss = torch.tensor([[s.mu, s.mc, s.fu, s.fc]], device="cpu")
             hdmu = ['u', 'c', '0']
             hds = ['M_u', 'M_c', 'F_u', 'F_c']
-            cells = {"uu": (0,0), "cc": (1,1), "u0": (0,2), "0u": (2,0) }
+            cells = {"uu": (0,0), "cc": (1,1), "u0": (0,2), "0u": (2,0),
+                     "c0": (1,2), "0c": (2,1)}
             couples = ["uu", "cc"]
-            singles = ["u0", "0u"]
+            singles = ["u0", "0u", "c0", "0c"]
 
         if vars == "KM":
             pk, pz = s.pknc, 1 - s.pknc

@@ -99,7 +99,7 @@ class SinkhornMproto(Sinkhorn):
         muc[:, -1:, :(F.shape[1]-1)] = muc0f.view(-1, 1, (F.shape[1]-1))
         V = torch.exp(pars[:, -1])
         stk = torch.cat((muc, M.unsqueeze(2), F.unsqueeze(2)), dim=2)
-        iter = self.num_iterations if self.training else 1000
+        iter = self.num_iterations if self.training else 100
         mus = torch.vmap(lambda p: self.sinkhorn(p[:, 0:3],
                                                  p[:, 3],
                                                  p[:, 4],
