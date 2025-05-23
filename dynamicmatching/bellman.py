@@ -216,12 +216,9 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
 
 
 
-    nmembs = torch.full(tMuHat.shape, 2, device = dev)
-    nmembs[:, :, -1] = nmembs[:, -1, :] = 1
-    tF = (tMuHat * nmembs).sum(1)
-    tM = (tMuHat * nmembs).sum(2)
-    ss_hat = torch.cat((tM[:,:].view(-1, nty0-1),
-                       tF[:,:].view(-1, nty0-1)), dim=1)
+    tM = tMuHat[:,:-1,:].sum(2)
+    tF = tMuHat[:,:,:-1].sum(1)
+    ss_hat = torch.cat((tM, tF), dim=1)
 
     # initial state
     ss_cur = ss_hat[0, :].view(1, -1)
