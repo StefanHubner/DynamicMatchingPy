@@ -92,9 +92,12 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
             theta1 = torch.tensor(boe2, device=dev, requires_grad = True)
             theta2 = torch.tensor(boe3, device=dev, requires_grad = True)
         elif vars == "Mproto":
-            theta0 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
-            theta1 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
-            theta2 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
+            #theta0 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
+            #theta1 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
+            #theta2 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
+            theta0 = torch.tensor([0.0, 0.0], device=dev, requires_grad=True)
+            theta1 = torch.tensor([0.0, 0.0], device=dev, requires_grad=True)
+            theta2 = torch.tensor([0.0, 0.0], device=dev, requires_grad=True)
 
     network0 = NN(tau, ndim, outdim)
     network1 = NN(tau, ndim, outdim)

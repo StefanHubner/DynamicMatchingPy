@@ -75,7 +75,7 @@ def check_mass(mus, s):
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
 
-    maskc, mask0 = masks
+    maskc, mask0 = masks # maskc now has all information
     phi0 = extend(phi)
     ndim = tP.shape[0]
     # concentrations = torch.tensor([1.0] * (tP.shape[0] * 2)).to(device = dev)
@@ -86,9 +86,7 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
 
     concentrations = torch.tensor([2.0] * ndim).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
-    mu_, sigma2_ = torch.tensor(0.0, device=dev), torch.tensor(0.073, device=dev)
-    normal = torch.distributions.Normal(mu_, sigma2_)
-    pm = torch.sigmoid(normal.sample((ng0, ))).reshape(-1, 1)
+    pm = 0.5 + (torch.rand((ng0, 1), device = dev) - 0.5) / 5
     s0 = torch.cat((dirichlet.sample((ng0, )) * pm,
                     dirichlet.sample((ng0, )) * (1-pm)), dim = 1)
     s = s0[torch.all(s0 > 0.04, dim=1)]
@@ -100,9 +98,6 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     _, vnext = xi(snext)
 
     unregularised = (mus * phi0).sum(dim=(1,2))
-    entropyc = (masked_log(mus, maskc) * mus).sum(dim = (1, 2))
-    entropyf = (masked_log(mus[:,-1,:], mask0) * mus[:,-1,:]).sum(dim=1)
-    entropym = (masked_log(mus[:,:,-1], mask0) * mus[:,:,-1]).sum(dim=1)
 
     # Choo/Siow (2006): 2ec-em-ef, Galichon has 2ec+em+ef (sometimes other)
     # 2 e_c - e_m - e_f is the one consistent with dE/dmu = Phi
@@ -110,7 +105,19 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     # we maximise, thus we punish mus close to 0 or 1 (due to adding up)
     # 1) fun = unregularised - (2 * entropyc + entropym + entropyf)
     # 2) fun = unregularised - (2 * entropyc - entropym - entropyf)
-    fun = unregularised - (2 * entropyc - entropym - entropyf)
+
+    # entropyc = (masked_log(mus[:,:-1,:-1], maskc[:-1,:-1]) * mus[:,:-1,:-1]).sum(dim = (1, 2))
+    # entropyf = (masked_log(mus[:,-1,:], mask0) * mus[:,-1,:]).sum(dim=1)
+    # entropym = (masked_log(mus[:,:,-1], mask0) * mus[:,:,-1]).sum(dim=1)
+    # entropy = -(2 * entropyc - entropym - entropyf)
+
+    mum_cond = mus[:,:-1,:] / s[:,0:ndim].reshape((ng, ndim, 1))
+    muf_cond = mus[:,:,:-1] / s[:,ndim:(2*ndim)].reshape((ng, 1, ndim))
+    entropy_c_m = mus[:,:-1,:] * masked_log(mum_cond, maskc[:-1,:])
+    entropy_c_f = mus[:,:,:-1] * masked_log(muf_cond, maskc[:,:-1])
+    entropy = -entropy_c_m.sum((1,2)) - entropy_c_f.sum((1,2))
+
+    fun = unregularised + entropy
 
     sumL = torch.sum(fun + beta * vnext)
     grads = autograd_grad(outputs=sumL, inputs=mus, create_graph=True)
@@ -119,7 +126,7 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
 
     margs = torch.cat([mus[:,:-1,:].sum(2), mus[:,:,:-1].sum(1)], dim=1)
 
-    lambda1, lambda2, lambda3 = 1.0, 0.1, 1.0
+    lambda1, lambda2, lambda3 = 1.0, 1.0, 0.0 # last part from sinkhorn
     r1 = lambda1 * torch.square((grads[0] * m2).view(ng, -1))
     r2 = lambda2 * torch.square((vcur - fun - beta * vnext).view(ng, 1))
     r3 = lambda3 * torch.square(s - margs).view(ng, -1)
@@ -136,8 +143,8 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
     phi = tau(theta, dev)
 
-    epochs = 5000
-    optimiser = optim.Adam(xi.parameters(), lr = .001) # , weight_decay = 0.01)
+    epochs = 100
+    optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
 
     def calculate_loss():
         optimiser.zero_grad()

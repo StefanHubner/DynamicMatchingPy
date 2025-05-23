@@ -52,7 +52,7 @@ def margin_projection(mu, M, F, iterations=20, epsilon=1e-8, tol=1e-6):
 
 class Sinkhorn(nn.Module):
     def __init__(self, tau, ndim, output_dim,
-                 hidden_layers=[64, 32, 16], num_iterations=10):
+                 hidden_layers=[64, 64, 32], num_iterations=10):
         super(Sinkhorn, self).__init__()
         self.input_dim = 2 * ndim
         self.output_dim = output_dim

@@ -104,9 +104,9 @@ mask0KM = [True, True, False, True, True, False, False]
 masksKM = (maskcKM, mask0KM)
 masksM = (maskcM, mask0M)
 
-maskcMp = [[True,   False, False],
-           [False,  True , False],
-           [False,  False, False]]
+maskcMp = [[True,   False, True],
+           [False,  True , True],
+           [True,   True, False]]
 masks0Mp = [True, True, False]
 masksMproto = (maskcMp, masks0Mp)
 
