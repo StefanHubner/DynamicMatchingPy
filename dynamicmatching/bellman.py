@@ -108,6 +108,8 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     # 2 e_c - e_m - e_f is the one consistent with dE/dmu = Phi
     # -entropy is the largest for uniform distribution (all mus equal)
     # we maximise, thus we punish mus close to 0 or 1 (due to adding up)
+    # 1) fun = unregularised - (2 * entropyc + entropym + entropyf)
+    # 2) fun = unregularised - (2 * entropyc - entropym - entropyf)
     fun = unregularised - (2 * entropyc - entropym - entropyf)
 
     sumL = torch.sum(fun + beta * vnext)

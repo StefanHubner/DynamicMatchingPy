@@ -113,7 +113,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                                   line_search_fn = 'strong_wolfe')
         num_epochs = 100
     else:
-        optim = torch.optim.Adam([theta0, theta1, theta2], lr = .1)
+        optim = torch.optim.Adam([theta0, theta1, theta2], lr = 1.0)
         num_epochs = 1000
 
     ng = 2**19 # max 2**19 number of draws (uniform gridpoints)
