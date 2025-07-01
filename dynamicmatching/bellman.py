@@ -143,37 +143,21 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
     phi = tau(theta, dev)
 
-    epochs = 100
+    epochs = 2000
     optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
 
-    def calculate_loss():
-        optimiser.zero_grad()
-        for attempts in range(1, 50): # safeguard for "bad draw" of s
-            val = residuals(ng, xi, tP, tQ, beta, phi, masks, dev)
-            if not val.isnan():
-                break
-            else:
-                print(f"{TermColours.BRIGHT_RED}.{TermColours.RESET}", end='')
-        val.backward(retain_graph=True)
-
-        #for name, param in xi.named_parameters():
-        #    if torch.isnan(param.grad).any():
-        #        pdb.set_trace()
-        # 2/4/25 tried without clipping
-        #torch.nn.utils.clip_grad_norm_(xi.parameters(), max_norm=1.0)
-        #torch.nn.utils.clip_grad_value_(xi.parameters(), 1.0)
-        return val
-
     for epoch in range(0, epochs):
-        loss = optimiser.step(calculate_loss)
+        optimiser.zero_grad()
+        loss = residuals(ng, xi, tP, tQ, beta, phi, masks, dev)
+        loss.backward(retain_graph=True)
+        optimiser.step()
+        if epoch < epochs - 1: # detach gradients in trajectory until (only keep for last)
+            for param in xi.parameters():
+                param.data = param.data.detach()
         grad_norm = check_grad_norm(optimiser)
         if epoch % (epochs // 100) == 0:
             print(f"{int((epoch/epochs) * 100)}%: {loss.item():.4f} [{grad_norm:.4f}] ",
                   end='\t', flush = "True")
-        #if grad_norm < 1.5 * 1e-4: # seems crude but should be close.. adapt this
-        #    print(f"Gradient close to zero, done.")
-        #    break
-
     return loss
 
 def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,

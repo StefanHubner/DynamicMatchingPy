@@ -112,12 +112,12 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     xi2 = network2.to(dev)
     if lbfgs:
         optim = torch.optim.LBFGS([theta0, theta1, theta2],
-                                  lr=1, max_iter=100,
+                                  lr=.1, max_iter=100,
                                   line_search_fn = 'strong_wolfe')
-        num_epochs = 100
+        num_epochs = 1
     else:
-        optim = torch.optim.Adam([theta0, theta1, theta2], lr = 1.0)
-        num_epochs = 1000
+        optim = torch.optim.Adam([theta0, theta1, theta2], lr = .1)
+        num_epochs = 2000
 
     ng = 2**19 # max 2**19 number of draws (uniform gridpoints)
     treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
@@ -181,8 +181,8 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                         {TermColours.GREEN}{muss} \
                         {TermColours.RESET}",
                       end='\t', flush=True)
+            history.to_csv('training_history.csv')
 
-        history.to_csv('training_history.csv')
         print(theta0hat, theta1hat, theta2hat)
         print("Done.")
 
