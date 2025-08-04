@@ -7,3 +7,4 @@ matched_process.pdf
 *.xls
 *.xlsx
 hfdd
+.env
