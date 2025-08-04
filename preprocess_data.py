@@ -80,10 +80,9 @@ t.columns
 t
 
 def trans_tensor(sex: str, i: int) -> torch.Tensor:
-    raw = trans(sex, i).values
-    diag = block_diagonal(ts.reshape((33, 32, 8))).reshape(33*32, 32)
-    return torch.tensor(diag, dtype=torch.float32)
-
+    raw = torch.tensor(trans(sex, i).values, dtype=torch.float32)
+    diag = block_diagonal(raw.reshape((33, 32, 8))).reshape(33*32, 32)
+    return diag
 
 def trans_tensor_old(sex: str, i: int) -> torch.Tensor:
     return torch.tensor(trans_old(sex, i).values, dtype=torch.float32)
@@ -164,7 +163,7 @@ tsred = reduce_trans_to_kids_marriage_spec
 def block_diagonal(tensor):
     i, j, k = tensor.shape  # (33, 32, 8)
     output = torch.zeros(i, 32, 32,
-                         dtype=tensor.float32,
+                         dtype=torch.float32,
                          device=tensor.device)
     blocks = tensor.view(i, 4, 8, 8)
     idx = torch.arange(4)
@@ -237,7 +236,7 @@ from huggingface_hub import login
 import os
 
 load_dotenv()
-hf_token = os.getenv('HF_TOKEN')
+hf_rwtoken = os.getenv('HF_TOKEN')
 from huggingface_hub import login
 login(token=hf_rwtoken)
 dataset_dict.push_to_hub("StefanHubner/DivorceData", token = hf_rwtoken)
@@ -250,10 +249,10 @@ class TensorModule(torch.nn.Module):
         return self.t
 
 # Assuming tMuHat, tPs, and tQs are already defined tensors.
-for filename, tensor in [("/tmp/tMuHat.pt", tMuHat),
-                         ("/tmp/tPs.pt", tPs),
-                         ("/tmp/tQs.pt", tQs)]:
-    module = TensorModule(tensor)
-    script_module = torch.jit.script(module)
-    torch.jit.save(script_module, filename)
+# for filename, tensor in [("/tmp/tMuHat.pt", tMuHat),
+#                          ("/tmp/tPs.pt", tPs),
+#                          ("/tmp/tQs.pt", tQs)]:
+#    module = TensorModule(tensor)
+#    script_module = torch.jit.script(module)
+#    torch.jit.save(script_module, filename)
 
