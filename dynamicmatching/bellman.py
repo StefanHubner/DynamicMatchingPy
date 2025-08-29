@@ -143,7 +143,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
     phi = tau(theta, dev)
 
-    epochs = 2000
+    epochs = 1000
     optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):

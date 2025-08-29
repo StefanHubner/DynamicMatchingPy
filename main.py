@@ -16,6 +16,7 @@ from dynamicmatching.helpers import tauMflex, tauKMsimple, tauMproto, masksM, ma
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url
 from dynamicmatching.bellman import minimise_inner, choices
 from dynamicmatching.deeplearning import SinkhornM, SinkhornKMsimple, SinkhornMproto, masked_log
+from dynamicmatching.neldermead import NelderMeadOptimizer
 
 st.set_page_config(page_title = "Dynamic Matching")
 
@@ -26,7 +27,7 @@ def load_data(name, dev):
     tPs = torch.tensor(data["p"][0], device = dev)
     tQs = torch.tensor(data["q"][0], device = dev)
     tMuHat = torch.tensor(data["couplings"][0], device = dev)
-    years = range(1995, 2021)
+    years = range(1999, 2021)
     return tPs, tQs, tMuHat, years
 
 def load_mus(xi0, xi1, xi2, t0, t1, t2, tPs, tQs, muh, ng, dev, tau, masks, tis,cf):
@@ -36,7 +37,7 @@ def load_mus(xi0, xi1, xi2, t0, t1, t2, tPs, tQs, muh, ng, dev, tau, masks, tis,
                                            skiptrain = True, cf = cf)
         return muh1, mus
 
-def main(train = False, noload = False, lbfgs = False, matchingplot = True):
+def main(train = False, noload = False, lbfgs = False, neldermead = False, matchingplot = True):
 
     torch.set_printoptions(precision=4, sci_mode=False)
     if torch.cuda.is_available():
@@ -53,7 +54,7 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
     # (name, state dim, net definition, outdim, masks, basis, parameter dim)
     #spec = ("M", 3, SinkhornM, 9, masksM, tauMflex, 4)
     #spec = ("KM", 6, SinkhornKMsimple, 17, masksKM, tauKMsimple, 8)
-    spec = ("Mproto", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2)
+    spec = ("M", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2)
     vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim = spec
     current = NN.__name__
     tPs, tQs, tMuHat, years = load_data(vars, dev)
@@ -115,6 +116,9 @@ def main(train = False, noload = False, lbfgs = False, matchingplot = True):
                                   lr=.1, max_iter=100,
                                   line_search_fn = 'strong_wolfe')
         num_epochs = 1
+    elif neldermead:
+        optim = NelderMeadOptimizer([theta0, theta1, theta2], lr = 1.0)
+        num_epochs = 100
     else:
         optim = torch.optim.Adam([theta0, theta1, theta2], lr = .1)
         num_epochs = 2000
@@ -395,8 +399,11 @@ if __name__ == "__main__":
     parser.add_argument("--lbfgs",
                         action="store_true",
                         help="Use LBFGS optim instead of Adam for outer.")
+    parser.add_argument("--neldermead",
+                        action="store_true",
+                        help="Use Nelder-Mead optim instead of Adam for outer.")
     parser.add_argument("--matchingplot",
                         action="store_true",
                         help="Run this script in streamlit.")
     args = parser.parse_args()
-    main(args.train, args.noload, args.lbfgs, args.matchingplot)
+    main(args.train, args.noload, args.lbfgs, args.neldermead, args.matchingplot)
