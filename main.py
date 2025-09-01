@@ -27,8 +27,7 @@ def load_data(name, dev):
     tPs = torch.tensor(data["p"][0], device = dev)
     tQs = torch.tensor(data["q"][0], device = dev)
     tMuHat = torch.tensor(data["couplings"][0], device = dev)
-    years = range(1999, 2021)
-    return tPs, tQs, tMuHat, years
+    return tPs, tQs, tMuHat
 
 def load_mus(xi0, xi1, xi2, t0, t1, t2, tPs, tQs, muh, ng, dev, tau, masks, tis,cf):
         _, muh1, mus, _, _, _ = match_moments(xi0, xi1, xi2, t0, t1, t2,
@@ -54,10 +53,10 @@ def main(train = False, noload = False, lbfgs = False, neldermead = False, match
     # (name, state dim, net definition, outdim, masks, basis, parameter dim)
     #spec = ("M", 3, SinkhornM, 9, masksM, tauMflex, 4)
     #spec = ("KM", 6, SinkhornKMsimple, 17, masksKM, tauKMsimple, 8)
-    spec = ("M", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2)
-    vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim = spec
+    spec = ("M", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2, range(1999, 2021), False)
+    vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim, years, train0 = spec
     current = NN.__name__
-    tPs, tQs, tMuHat, years = load_data(vars, dev)
+    tPs, tQs, tMuHat = load_data(vars, dev)
 
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
@@ -133,7 +132,7 @@ def main(train = False, noload = False, lbfgs = False, neldermead = False, match
         closure, add_outputs = create_closure(xi0, xi1, xi2, theta0, theta1, theta2,
                                               tPs, tQs, tMuHat, ng,
                                               dev, tau, masks,
-                                              treat_idcs, optim, CF.None_)
+                                              treat_idcs, optim, CF.None_, train0)
         torch.set_printoptions(precision = 5, sci_mode=False)
         columns = ['loss', 'l0', 'l1', 'l2']
         for i in range(theta0.shape[0]):

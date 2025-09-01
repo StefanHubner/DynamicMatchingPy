@@ -10,7 +10,7 @@ from .deeplearning import masked_log
 from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF, extend
 
 def create_closure(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
-                   tMuHat, ng, dev, tau, masks, treat_idcs, optim, cf):
+                   tMuHat, ng, dev, tau, masks, treat_idcs, optim, cf, train0):
     # Use a list as a mutable container
     additional_outputs = [None, None, None, None, None]
     def closure():
@@ -20,7 +20,7 @@ def create_closure(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
                                                 tPs, tQs,
                                                 tMuHat, ng, dev,
                                                 tau, masks, treat_idcs,
-                                                skiptrain=False, cf = cf)
+                                                skiptrain=False, cf = cf, train0 = train0)
         resid.backward()
         additional_outputs[0] = ssh.detach().cpu()
         additional_outputs[1] = sss.detach().cpu()
@@ -162,7 +162,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
 
 def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
                   tMuHat, ng, dev, tau, masks, treat_idcs,
-                  skiptrain = False, cf = CF.None_):
+                  skiptrain = False, cf = CF.None_, train0 = True):
 
     beta = torch.tensor(0.9, device=dev)
 
@@ -173,9 +173,10 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
     # update: now gradient graph is kept and phi is set to requires_grad
 
     if not skiptrain:
-        xi0.train()
-        loss0 = minimise_inner(xi0, theta0, beta, tPs[0], tQs[0],
-                               ng, tau, masks, dev)
+        if train0:
+            xi0.train()
+            loss0 = minimise_inner(xi0, theta0, beta, tPs[0], tQs[0],
+                                   ng, tau, masks, dev)
         xi1.train()
         loss1 = minimise_inner(xi1, theta1, beta, tPs[1], tQs[1],
                                ng, tau, masks, dev)
@@ -226,9 +227,7 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
     walker_pre = transition(xi0, tPs[0], tQs[0], cf)
     walker_treat = transition(xi1, tPs[1], tQs[1], cf)
     walker_post = transition(xi2, tPs[2], tQs[2], cf)
-    regimes = [(pre, walker_pre),
-               (treat_idcs, walker_treat),
-               (post, walker_post)]
+    regimes = ([(pre, walker_pre)] if train0 else []) + [(treat_idcs, walker_treat), (post, walker_post)]
 
     ss_star = torch.zeros(nT, ss_cur.shape[1]).to(dev)
     mu_star = torch.zeros(nT, nty0, nty0).to(dev)

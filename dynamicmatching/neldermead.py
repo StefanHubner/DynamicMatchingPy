@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 class NelderMeadOptimizer:
     def __init__(self, params, lr=1.0, alpha=1.0, gamma=2.0, rho=0.5, sigma=0.5):
