@@ -25,8 +25,8 @@ st.set_page_config(page_title = "Dynamic Matching")
 @st.cache_resource
 def load_data(name, dev):
     import os
-    token = os.environ.get("HF_TOKEN")
-    login(token=token, add_to_git_credential=True)
+    token = os.environ.get("HF_TOKEN") # I think HF_TOKEN is used by default
+    login(token=token, add_to_git_credential=True) 
     data = load_dataset("StefanHubner/DivorceData")[name]
     tPs = torch.tensor(data["p"][0], device = dev)
     tQs = torch.tensor(data["q"][0], device = dev)
