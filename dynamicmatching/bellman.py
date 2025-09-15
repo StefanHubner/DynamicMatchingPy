@@ -177,6 +177,8 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
             xi0.train()
             loss0 = minimise_inner(xi0, theta0, beta, tPs[0], tQs[0],
                                    ng, tau, masks, dev)
+        else:
+            loss0 = torch.tensor(0.0, device = dev)
         xi1.train()
         loss1 = minimise_inner(xi1, theta1, beta, tPs[1], tQs[1],
                                ng, tau, masks, dev)
