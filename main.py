@@ -8,6 +8,7 @@ import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
 from datasets import load_dataset
+from huggingface_hub import login, whoami
 from torchviz import make_dot
 from PIL import Image
 
@@ -23,20 +24,26 @@ st.set_page_config(page_title = "Dynamic Matching")
 
 @st.cache_resource
 def load_data(name, dev):
+    import os
+    token = os.environ.get("HF_TOKEN")
+    login(token=token, add_to_git_credential=True)
     data = load_dataset("StefanHubner/DivorceData")[name]
     tPs = torch.tensor(data["p"][0], device = dev)
     tQs = torch.tensor(data["q"][0], device = dev)
     tMuHat = torch.tensor(data["couplings"][0], device = dev)
     return tPs, tQs, tMuHat
 
-def load_mus(xi0, xi1, xi2, t0, t1, t2, tPs, tQs, muh, ng, dev, tau, masks, tis,cf):
-        _, muh1, mus, _, _, _ = match_moments(xi0, xi1, xi2, t0, t1, t2,
-                                           tPs, tQs, muh, ng,
-                                           dev, tau, masks, tis,
-                                           skiptrain = True, cf = cf)
-        return muh1, mus
+def load_mus(xi0, xi1, xi2, t0, t1, t2, tPs, tQs, muh, ng, dev, tau,
+             masks, tis, cf, train0):
+    _, muh1, mus, _, _, _ = match_moments(xi0, xi1, xi2, t0, t1, t2,
+                                          tPs, tQs, muh, ng,
+                                          dev, tau, masks, tis,
+                                          skiptrain = True, cf = cf,
+                                          train0 = train0)
+    return muh1, mus
 
-def main(train = False, noload = False, lbfgs = False, neldermead = False, matchingplot = True):
+def main(train = False, noload = False, lbfgs = False,
+         neldermead = False, matchingplot = True):
 
     torch.set_printoptions(precision=4, sci_mode=False)
     if torch.cuda.is_available():
@@ -53,7 +60,8 @@ def main(train = False, noload = False, lbfgs = False, neldermead = False, match
     # (name, state dim, net definition, outdim, masks, basis, parameter dim)
     #spec = ("M", 3, SinkhornM, 9, masksM, tauMflex, 4)
     #spec = ("KM", 6, SinkhornKMsimple, 17, masksKM, tauKMsimple, 8)
-    spec = ("M", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2, range(1999, 2021), False)
+    spec = ("M", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2, range(1999, 2021), False) # should be this, but used cached data 
+    #spec = ("Mproto", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2, range(1995, 2021), False)
     vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim, years, train0 = spec
     current = NN.__name__
     tPs, tQs, tMuHat = load_data(vars, dev)
@@ -206,7 +214,7 @@ def main(train = False, noload = False, lbfgs = False, neldermead = False, match
         _, mu_star = load_mus(xi0, xi1, xi2, theta0, theta1, theta2,
                               tPs, tQs, mu_hat, ng,
                               "cpu", tau, masks, treat_idcs,
-                              cf = CF.None_)
+                              cf = CF.None_, train0 = train0)
 
         s = st.session_state
         if vars == "M" or vars == "KM":
@@ -245,7 +253,7 @@ def main(train = False, noload = False, lbfgs = False, neldermead = False, match
                               key='pkc', disabled=False)
             st.sidebar.slider('$P(k|\\neg c)$', 0.0, 1.0, step=0.01,
                               key='pknc', disabled=False)
-        elif vars == "Mproto":
+        elif vars == "Mproto" or vars == "M":
             if 'mu' not in s: s.mu = 0.25
             if 'fu' not in s: s.fu = 0.25
 
@@ -319,10 +327,10 @@ def main(train = False, noload = False, lbfgs = False, neldermead = False, match
                     )
                     st.dataframe(df)
 
-            st.subheader('$\\mu_0$ in %')
+            st.subheader('$\\mu_1$ in %')
             fmarg = ss[0, ndim:2*ndim].detach().numpy().tolist()
             mmarg = ss[0, 0:ndim].detach().numpy().tolist()
-            st.pyplot(create_heatmap(mus0[0]*100,
+            st.pyplot(create_heatmap(mus1[0]*100,
                        ["{:.1f}".format(f*100) for f in fmarg + [0]],
                        ["{:.1f}".format(m*100) for m in mmarg + [0]]
                                      , hdmu), use_container_width=False)
