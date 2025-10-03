@@ -217,7 +217,7 @@ def main(train = False, noload = False, lbfgs = False,
                               cf = CF.None_, train0 = train0)
 
         s = st.session_state
-        if vars == "M" or vars == "KM":
+        if vars == "KM":
             if 'mn' not in s: s.mn = 0.20
             if 'me' not in s: s.me = 0.03
             if 'zn' not in s: s.zn = 0.16
@@ -295,14 +295,7 @@ def main(train = False, noload = False, lbfgs = False,
                      "knkn": (3,3), "keke": (4,4)}
             couples = ["znzn", "zeze", "zczc", "knkn", "keke", "kckc"]
             singles = ["zn0", "0zn"]
-        elif vars == "M":
-            ss = torch.tensor([[mn, me, s.mc, zn, s.ze, s.zc]], device="cpu")
-            hdmu = ['n','e','c','0']
-            hds = ['M_n', 'M_e', 'M_c', 'F_n', 'F_e', 'F_c']
-            cells = {"nn": (0,0), "ee": (1,1), "ne": (0,1), "cc": (2,2),
-                     "n0": (0,3), "e0": (1,3), "0n": (3,0), "0e": (3,1)}
-            couples = ["nn", "ee", "ne", "cc"]
-            singles = ["n0", "e0", "0n", "0e"]
+
         mus0, v0 = xi0(ss)
         ssnext0 = choices(mus0, tPs[0], tQs[0], "cpu")
         mus1, v1 = xi1(ss)
