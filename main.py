@@ -13,7 +13,7 @@ from torchviz import make_dot
 from PIL import Image
 
 from dynamicmatching.bellman import match_moments, create_closure
-from dynamicmatching.helpers import tauMflex, tauKMsimple, tauMproto, masksM, masksKM, masksMproto, TermColours, CF
+from dynamicmatching.helpers import tauMflex, tauKMsimple, tauMproto, tauMtrend, masksM, masksKM, masksMproto, TermColours, CF
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url
 from dynamicmatching.bellman import minimise_inner, choices
 from dynamicmatching.deeplearning import SinkhornM, SinkhornKMsimple, SinkhornMproto, masked_log
@@ -60,12 +60,11 @@ def main(train = False, noload = False, lbfgs = False,
     # (name, state dim, net definition, outdim, masks, basis, parameter dim)
     #spec = ("M", 3, SinkhornM, 9, masksM, tauMflex, 4)
     #spec = ("KM", 6, SinkhornKMsimple, 17, masksKM, tauKMsimple, 8)
-    spec = ("M", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2, range(1999, 2021), False) # should be this, but used cached data 
-    #spec = ("Mproto", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2, range(1995, 2021), False)
-    vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim, years, train0 = spec
-    current = NN.__name__
+    #spec = ("M", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2, range(1999, 2021), False, "M")
+    spec = ("M", 2, SinkhornMproto, 8, masksMproto, tauMtrend, 3, range(1999, 2021), False, "Mtrend")
+    vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim, years, train0, current = spec
+    # current = NN.__name__
     tPs, tQs, tMuHat = load_data(vars, dev)
-
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
 
@@ -91,21 +90,6 @@ def main(train = False, noload = False, lbfgs = False,
                               device=dev, requires_grad = True)
         theta2 = torch.tensor(thetadim * [0.0], dtype=torch.float32,
                               device=dev, requires_grad = True)
-        if vars == "KM": # this is from GS09 back of envelope of the mean
-            boe = [0.64, 7.17, 2.62, 3.75, 0.32, 4.10, 10.0, 20.0]
-            boe1 = [0.77, 6.47, 2.55, 4.19, 0.46, 4.30, 10.0, 20.0]
-            boe2 = [0.77, 7.43, 2.56, 3.84, 0.42, 4.50, 10.0, 20.0]
-            boe3 = [0.50, 7.13, 2.67, 3.56, 0.30, 4.05, 10.0, 20.0]
-            theta0 = torch.tensor(boe1, device=dev, requires_grad = True)
-            theta1 = torch.tensor(boe2, device=dev, requires_grad = True)
-            theta2 = torch.tensor(boe3, device=dev, requires_grad = True)
-        elif vars == "Mproto":
-            #theta0 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
-            #theta1 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
-            #theta2 = torch.tensor([-1.185, 4.094], device=dev, requires_grad=True)
-            theta0 = torch.tensor([0.0, 0.0], device=dev, requires_grad=True)
-            theta1 = torch.tensor([0.0, 0.0], device=dev, requires_grad=True)
-            theta2 = torch.tensor([0.0, 0.0], device=dev, requires_grad=True)
 
     network0 = NN(tau, ndim, outdim)
     network1 = NN(tau, ndim, outdim)
@@ -140,7 +124,7 @@ def main(train = False, noload = False, lbfgs = False,
         closure, add_outputs = create_closure(xi0, xi1, xi2, theta0, theta1, theta2,
                                               tPs, tQs, tMuHat, ng,
                                               dev, tau, masks,
-                                              treat_idcs, optim, CF.None_, train0)
+                                              treat_idcs, years, optim, CF.None_, train0)
         torch.set_printoptions(precision = 5, sci_mode=False)
         columns = ['loss', 'l0', 'l1', 'l2']
         for i in range(theta0.shape[0]):
@@ -302,11 +286,6 @@ def main(train = False, noload = False, lbfgs = False,
         ssnext1 = choices(mus1, tPs[1], tQs[1], "cpu")
         mus2, v2 = xi2(ss)
         ssnext2 = choices(mus2, tPs[2], tQs[2], "cpu")
-        phi = lambda theta: torch.cat((
-                                  torch.cat((
-                                        tau(theta, "cpu"),
-                                        torch.zeros(ndim, 1)), dim=1),
-                                  torch.zeros(1, ndim+1)), dim=0)
         with sandbox:
             cols = st.columns(3)
             columns_data = zip(cols, [theta0, theta1, theta2], range(3))
@@ -314,7 +293,7 @@ def main(train = False, noload = False, lbfgs = False,
                 with col:
                     st.subheader('$\\Phi(\\widehat{{\\theta}}_{})$'.format(idx))
                     df = pd.DataFrame(
-                        phi(theta).detach().numpy(),
+                        tau(theta, "cpu").detach().numpy(),
                         index=hdmu,
                         columns=hdmu
                     )

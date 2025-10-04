@@ -54,7 +54,7 @@ class Sinkhorn(nn.Module):
     def __init__(self, tau, ndim, output_dim,
                  hidden_layers=[32, 16], num_iterations=10):
         super(Sinkhorn, self).__init__()
-        self.input_dim = 2 * ndim
+        self.input_dim = 2 * ndim + 1 # margins + time
         self.output_dim = output_dim
         self.tau = tau
         self.sinkhorn = sinkhorn_knopp
@@ -87,14 +87,17 @@ class SinkhornMproto(Sinkhorn):
         self.extend = extend
         self.num_iterations = 25
 
-    def forward(self, margins):
-        zs = torch.zeros((margins.shape[0], 1), device = margins.device)
-        M = torch.cat((margins[:, 0:2], zs), dim=1)
-        F = torch.cat((margins[:, 2:4], zs), dim=1)
-        pars = self.layers(margins)
-        muc = torch.vmap(lambda p: self.extend(self.tau(p, pars.device)),
-                         in_dims=0)(torch.exp(pars[:, 0:2]))  # positive!
-        mucm0, muc0f = torch.exp(pars[:, 2:4]), torch.exp(pars[:, 4:6]) # positive!
+    def forward(self, margins_t):
+        zs = torch.zeros((margins_t.shape[0], 1),
+                         device = margins_t.device)
+        M = torch.cat((margins_t[:, 0:2], zs), dim=1)
+        F = torch.cat((margins_t[:, 2:4], zs), dim=1)
+        ts = margins_t[:,4]
+        pars = self.layers(margins_t)
+        vmapper = torch.vmap(lambda p, t: self.tau(p, t, pars.device),
+                             in_dims=(0, 0))
+        muc = vmapper(torch.exp(pars[:, 0:3]), ts)  # positive, time-dep!
+        mucm0, muc0f = torch.exp(pars[:, 3:5]), torch.exp(pars[:, 5:7]) # positive!
         muc[:, :(M.shape[1]-1), -1:] = mucm0.view(-1, (M.shape[1]-1), 1)
         muc[:, -1:, :(F.shape[1]-1)] = muc0f.view(-1, 1, (F.shape[1]-1))
         V = torch.exp(pars[:, -1])

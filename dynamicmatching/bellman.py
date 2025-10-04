@@ -10,7 +10,8 @@ from .deeplearning import masked_log
 from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF, extend
 
 def create_closure(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
-                   tMuHat, ng, dev, tau, masks, treat_idcs, optim, cf, train0):
+                   tMuHat, ng, dev, tau, masks, treat_idcs, years,
+                   optim, cf, train0):
     # Use a list as a mutable container
     additional_outputs = [None, None, None, None, None]
     def closure():
@@ -20,7 +21,8 @@ def create_closure(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
                                                 tPs, tQs,
                                                 tMuHat, ng, dev,
                                                 tau, masks, treat_idcs,
-                                                skiptrain=False, cf = cf, train0 = train0)
+                                                years, skiptrain=False,
+                                                cf = cf, train0 = train0)
         resid.backward()
         additional_outputs[0] = ssh.detach().cpu()
         additional_outputs[1] = sss.detach().cpu()
@@ -56,12 +58,12 @@ def choices_vectorised(mus, p, q, dev):
          torch.matmul(tMuF.view(-1, q.shape[1]), q.T)],
         dim=1)
 
-def choices(mus, p, q, dev):
+def choices(mus, t, p, q, dev):
     tMuM = mus[:,:-1,:]
     tMuF = mus[:,:,:-1]
     M = torch.einsum('nij,ijk->nk', tMuM, p)
     F = torch.einsum('nij,ijk->nk', tMuF, q)
-    return torch.cat([M, F], dim = 1)
+    return torch.cat([M, F, t + 1], dim = 1)
 
 def check_mass(mus, s):
     ntypes = s.shape[1] // 2
@@ -73,16 +75,10 @@ def check_mass(mus, s):
     print(f"{TermColours.CYAN} {offdiag:.2f} {TermColours.RESET}", end='')
 
 # Define the residuals function (unconstrained + sinkhorn)
-def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
+def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
 
     maskc, mask0 = masks # maskc now has all information
-    phi0 = extend(phi)
     ndim = tP.shape[0]
-    # concentrations = torch.tensor([1.0] * (tP.shape[0] * 2)).to(device = dev)
-    # dirichlet = torch.distributions.Dirichlet(concentrations)
-    # s0 = dirichlet.sample((ng0, ))
-    # s = s0[torch.all(s0 > 0.02, dim=1)] # 0.02 worked
-    # ng = s.shape[0]
 
     concentrations = torch.tensor([2.0] * ndim).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
@@ -91,12 +87,16 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
                     dirichlet.sample((ng0, )) * (1-pm)), dim = 1)
     s = s0[torch.all(s0 > 0.04, dim=1)]
     ng = s.shape[0]
+    rts = ts[torch.randint(0, ts.numel(), (ng, 1))]
+    st = torch.cat((s, rts), dim = 1)
 
-    mus, vcur = xi(s)
+    mus, vcur = xi(st)
     check_mass(mus, s)
-    snext = choices(mus, tP, tQ, dev)
-    _, vnext = xi(snext)
+    stnext = choices(mus, rts, tP, tQ, dev)
+    _, vnext = xi(stnext)
 
+    vmapper = torch.vmap(lambda t: tau(theta, t, dev), in_dims=0)
+    phi0 = vmapper(rts)
     unregularised = (mus * phi0).sum(dim=(1,2))
 
     # Choo/Siow (2006): 2ec-em-ef, Galichon has 2ec+em+ef (sometimes other)
@@ -139,16 +139,14 @@ def residuals(ng0, xi, tP, tQ, beta, phi, masks, dev):
     return mean_resid_v
 
 
-def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
+def minimise_inner(xi, theta, beta, tP, tQ, ng, ts, tau, masks, dev):
 
-    phi = tau(theta, dev)
-
-    epochs = 1000
+    epochs = 100
     optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):
         optimiser.zero_grad()
-        loss = residuals(ng, xi, tP, tQ, beta, phi, masks, dev)
+        loss = residuals(ng, xi, tP, tQ, beta, theta, tau, masks, ts, dev)
         loss.backward(retain_graph=True)
         optimiser.step()
         if epoch < epochs - 1: # detach gradients in trajectory until (only keep for last)
@@ -161,10 +159,12 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, tau, masks, dev):
     return loss
 
 def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
-                  tMuHat, ng, dev, tau, masks, treat_idcs,
+                  tMuHat, ng, dev, tau, masks, treat_idcs, years,
                   skiptrain = False, cf = CF.None_, train0 = True):
 
     beta = torch.tensor(0.9, device=dev)
+    ts0 = torch.tensor(years, device=dev)
+    ts = (ts0 - torch.min(ts0)) / (torch.max(ts0) - torch.min(ts0))
 
     # these won't depend on phi (leaves in the autograd graph)
     # dldTheta is gradient with respect to inner loss function
@@ -176,29 +176,24 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
         if train0:
             xi0.train()
             loss0 = minimise_inner(xi0, theta0, beta, tPs[0], tQs[0],
-                                   ng, tau, masks, dev)
+                                   ng, ts, tau, masks, dev)
         else:
             loss0 = torch.tensor(0.0, device = dev)
         xi1.train()
         loss1 = minimise_inner(xi1, theta1, beta, tPs[1], tQs[1],
-                               ng, tau, masks, dev)
+                               ng, ts, tau, masks, dev)
         xi2.train()
         loss2 = minimise_inner(xi2, theta2, beta, tPs[2], tQs[2],
-                               ng, tau, masks, dev)
+                               ng, ts, tau, masks, dev)
     else:
         loss0, loss1, loss2 = None, None, None
 
     nT, nty0, nty0 = tMuHat.size()
 
-    def transition_s(xi, p, q): # deprecated
-        def step(ss):
-            mus, _ = xi(ss)
-            return choices(mus, p, q, dev)
-        return step
     def transition_mu(xi, p, q, cf):
-        def step(mus):
-            ss = choices(mus, p, q, dev)
-            mus, _ = xi(ss)
+        def step(mus, t):
+            sst = choices(mus, t, p, q, dev)
+            mus, _ = xi(sst)
             return mus
         def step_household(mus): # not in use
             raise NotImplementedError()
@@ -237,7 +232,7 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
     for (idcs, walker) in regimes:
         for i in idcs:
            mu_star[i, :, :] = mu_cur
-           mu_cur = walker(mu_cur)
+           mu_cur = walker(mu_cur, ts[i].view(1,1)) # ts[i] to be safe
            #ss_star[i, ] = ss_cur
            #ss_cur = walker(ss_cur)
 

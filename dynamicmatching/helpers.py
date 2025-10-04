@@ -56,14 +56,25 @@ def tauM(par, treat, dev):
         mbasis(3, 1, 1, dev),
         mbasis(3, 0, 1, dev) + mbasis(3, 1, 0, dev),
         mbasis(3, 2, 2, dev))) # by convention the last one is (c, c)
-    return torch.multiply(rs.view(-1, 1, 1), b).sum(dim=0)
+    return extend(torch.multiply(rs.view(-1, 1, 1), b).sum(dim=0))
 
 # tau for married new prototype (2x2) 
 def tauMproto(par, dev):
     b = torch.stack((
         mbasis(2, 0, 0, dev),
         mbasis(2, 1, 1, dev)))
-    return torch.multiply(par.view(-1, 1, 1), b).sum(dim=0)
+    return extend(torch.multiply(par.view(-1, 1, 1), b).sum(dim=0))
+
+def tauMtrend(par, t, dev):
+    b_const = torch.stack((
+        mbasis(2, 0, 0, dev),
+        mbasis(2, 1, 1, dev)))
+    b_slope = mbasis(2, 1, 1, dev)
+    p_const = par[0:2].view(-1, 1, 1)
+    p_slope = par[2].view(-1, 1)
+    const = torch.multiply(b_const, p_const).sum(dim = 0)
+    trend = t * torch.multiply(p_slope, b_slope)
+    return extend(const + trend)
 
 # takes 4 parameters
 def tauMflex(par, dev):
@@ -72,7 +83,7 @@ def tauMflex(par, dev):
         mbasis(3, 1, 1, dev),
         mbasis(3, 0, 1, dev) + mbasis(3, 1, 0, dev),
         mbasis(3, 2, 2, dev))) # by convention the last one is (c, c)
-    return torch.multiply(par.view(-1, 1, 1), b).sum(dim=0)
+    return extend(torch.multiply(par.view(-1, 1, 1), b).sum(dim=0))
 
 # takes 8 parameters
 def tauKMsimple(par, dev):
@@ -85,7 +96,7 @@ def tauKMsimple(par, dev):
         mbasis(6, 3, 4, dev) + mbasis(6, 4, 3, dev), # knke,kekn
         mbasis(6, 2, 2, dev), # zczc
         mbasis(6, 5, 5, dev))) # kckc
-    return torch.multiply(par.view(-1, 1, 1), b).sum(dim=0)
+    return extend(torch.multiply(par.view(-1, 1, 1), b).sum(dim=0))
 
 
 
