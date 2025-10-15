@@ -9,26 +9,24 @@ import sys
 from .deeplearning import masked_log
 from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF, extend
 
-def create_closure(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
+def create_closure(xi, theta, tPs, tQs,
                    tMuHat, ng, dev, tau, masks, treat_idcs, years,
                    optim, cf, train0):
     # Use a list as a mutable container
-    additional_outputs = [None, None, None, None, None]
+    additional_outputs = [None, None, None]
     def closure():
         optim.zero_grad()
-        resid, ssh, sss, l0, l1, l2 = match_moments(xi0, xi1, xi2,
-                                                theta0, theta1, theta2,
-                                                tPs, tQs,
-                                                tMuHat, ng, dev,
-                                                tau, masks, treat_idcs,
-                                                years, skiptrain=False,
-                                                cf = cf, train0 = train0)
+        resid, ssh, sss, l = match_moments(xi,
+                                           theta,
+                                           tPs, tQs,
+                                           tMuHat, ng, dev,
+                                           tau, masks, treat_idcs,
+                                           years, skiptrain=False,
+                                           cf = cf, train0 = train0)
         resid.backward()
         additional_outputs[0] = ssh.detach().cpu()
         additional_outputs[1] = sss.detach().cpu()
-        additional_outputs[2] = l0.detach().cpu()
-        additional_outputs[3] = l1.detach().cpu()
-        additional_outputs[4] = l2.detach().cpu()
+        additional_outputs[2] = l.detach().cpu()
         return resid
     return closure, additional_outputs
 
@@ -58,12 +56,12 @@ def choices_vectorised(mus, p, q, dev):
          torch.matmul(tMuF.view(-1, q.shape[1]), q.T)],
         dim=1)
 
-def choices(mus, t, p, q, dev):
+def choices(mus, t, d, p, q, dev):
     tMuM = mus[:,:-1,:]
     tMuF = mus[:,:,:-1]
     M = torch.einsum('nij,ijk->nk', tMuM, p)
     F = torch.einsum('nij,ijk->nk', tMuF, q)
-    return torch.cat([M, F, t + 1], dim = 1)
+    return torch.cat([M, F, t + 1, d], dim = 1)
 
 def check_mass(mus, s):
     ntypes = s.shape[1] // 2
@@ -75,10 +73,10 @@ def check_mass(mus, s):
     print(f"{TermColours.CYAN} {offdiag:.2f} {TermColours.RESET}", end='')
 
 # Define the residuals function (unconstrained + sinkhorn)
-def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
+def residuals(ng0, xi, tPs, tQs, beta, theta, tau, masks, ts, dev):
 
     maskc, mask0 = masks # maskc now has all information
-    ndim = tP.shape[0]
+    ndim = tPs[0].shape[0]
 
     concentrations = torch.tensor([2.0] * ndim).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
@@ -88,15 +86,16 @@ def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
     s = s0[torch.all(s0 > 0.04, dim=1)]
     ng = s.shape[0]
     rts = ts[torch.randint(0, ts.numel(), (ng, 1))]
-    st = torch.cat((s, rts), dim = 1)
+    rds = torch.randint(0, 2, (ng, 1), device = dev)
+    st = torch.cat((s, rts, rds), dim = 1)
 
     mus, vcur = xi(st)
     check_mass(mus, s)
-    stnext = choices(mus, rts, tP, tQ, dev)
+    stnext = choices(mus, rts, rds, tPs[1], tQs[1], dev)
     _, vnext = xi(stnext)
 
-    vmapper = torch.vmap(lambda t: tau(theta, t, dev), in_dims=0)
-    phi0 = vmapper(rts)
+    vmapper = torch.vmap(lambda t, d: tau(theta, t, d, dev), in_dims=(0, 0))
+    phi0 = vmapper(rts, rds)
     unregularised = (mus * phi0).sum(dim=(1,2))
 
     # Choo/Siow (2006): 2ec-em-ef, Galichon has 2ec+em+ef (sometimes other)
@@ -139,14 +138,14 @@ def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
     return mean_resid_v
 
 
-def minimise_inner(xi, theta, beta, tP, tQ, ng, ts, tau, masks, dev):
+def minimise_inner(xi, theta, beta, tPs, tQs, ng, ts, tau, masks, dev):
 
-    epochs = 100
+    epochs = 200
     optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):
         optimiser.zero_grad()
-        loss = residuals(ng, xi, tP, tQ, beta, theta, tau, masks, ts, dev)
+        loss = residuals(ng, xi, tPs, tQs, beta, theta, tau, masks, ts, dev)
         loss.backward(retain_graph=True)
         optimiser.step()
         if epoch < epochs - 1: # detach gradients in trajectory until (only keep for last)
@@ -158,7 +157,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, ts, tau, masks, dev):
                   end='\t', flush = "True")
     return loss
 
-def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
+def match_moments(xi, theta, tPs, tQs,
                   tMuHat, ng, dev, tau, masks, treat_idcs, years,
                   skiptrain = False, cf = CF.None_, train0 = True):
 
@@ -173,26 +172,17 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
     # update: now gradient graph is kept and phi is set to requires_grad
 
     if not skiptrain:
-        if train0:
-            xi0.train()
-            loss0 = minimise_inner(xi0, theta0, beta, tPs[0], tQs[0],
-                                   ng, ts, tau, masks, dev)
-        else:
-            loss0 = torch.tensor(0.0, device = dev)
-        xi1.train()
-        loss1 = minimise_inner(xi1, theta1, beta, tPs[1], tQs[1],
-                               ng, ts, tau, masks, dev)
-        xi2.train()
-        loss2 = minimise_inner(xi2, theta2, beta, tPs[2], tQs[2],
-                               ng, ts, tau, masks, dev)
+        xi.train()
+        loss = minimise_inner(xi, theta, beta, tPs, tQs,
+                              ng, ts, tau, masks, dev)
     else:
-        loss0, loss1, loss2 = None, None, None
+        loss = None
 
     nT, nty0, nty0 = tMuHat.size()
 
     def transition_mu(xi, p, q, cf):
-        def step(mus, t):
-            sst = choices(mus, t, p, q, dev)
+        def step(mus, t, d):
+            sst = choices(mus, t, d, p, q, dev)
             mus, _ = xi(sst)
             return mus
         def step_household(mus): # not in use
@@ -217,13 +207,11 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
     control_idcs = list(pre) + list(post)
 
     # we recursively define the whole path
-    xi0.eval()
-    xi1.eval()
-    xi2.eval()
+    xi.eval()
     transition = transition_mu
-    walker_pre = transition(xi0, tPs[0], tQs[0], cf)
-    walker_treat = transition(xi1, tPs[1], tQs[1], cf)
-    walker_post = transition(xi2, tPs[2], tQs[2], cf)
+    walker_pre = transition(xi, tPs[0], tQs[0], cf)
+    walker_treat = transition(xi, tPs[1], tQs[1], cf)
+    walker_post = transition(xi, tPs[2], tQs[2], cf)
     regimes = ([(pre, walker_pre)] if train0 else []) + [(treat_idcs, walker_treat), (post, walker_post)]
 
     ss_star = torch.zeros(nT, ss_cur.shape[1]).to(dev)
@@ -232,7 +220,8 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
     for (idcs, walker) in regimes:
         for i in idcs:
            mu_star[i, :, :] = mu_cur
-           mu_cur = walker(mu_cur, ts[i].view(1,1)) # ts[i] to be safe
+           d = torch.tensor(int(i in treat_idcs), device = dev)
+           mu_cur = walker(mu_cur, ts[i].view(1,1), d.view(1,1)) # ts[i] to be safe
            #ss_star[i, ] = ss_cur
            #ss_cur = walker(ss_cur)
 
@@ -240,4 +229,4 @@ def match_moments(xi0, xi1, xi2, theta0, theta1, theta2, tPs, tQs,
 
     torch.cuda.empty_cache()
 
-    return (resid, tMuHat, mu_star, loss0, loss1, loss2)
+    return (resid, tMuHat, mu_star, loss)

@@ -21,6 +21,8 @@ from dynamicmatching.neldermead import NelderMeadOptimizer
 
 st.set_page_config(page_title = "Dynamic Matching")
 
+# for debug
+# noload, lbfgs, neldermead, ng0 = True, False, True, 128
 
 @st.cache_resource
 def load_data(name, dev):
@@ -33,9 +35,9 @@ def load_data(name, dev):
     tMuHat = torch.tensor(data["couplings"][0], device = dev)
     return tPs, tQs, tMuHat
 
-def load_mus(xi0, xi1, xi2, t0, t1, t2, tPs, tQs, muh, ng, dev, tau,
+def load_mus(xi, theta, tPs, tQs, muh, ng, dev, tau,
              masks, tis, cf, train0):
-    _, muh1, mus, _, _, _ = match_moments(xi0, xi1, xi2, t0, t1, t2,
+    _, muh1, mus, _, _, _ = match_moments(xi, theta,
                                           tPs, tQs, muh, ng,
                                           dev, tau, masks, tis,
                                           skiptrain = True, cf = cf,
@@ -61,7 +63,7 @@ def main(train = False, noload = False, lbfgs = False,
     #spec = ("M", 3, SinkhornM, 9, masksM, tauMflex, 4)
     #spec = ("KM", 6, SinkhornKMsimple, 17, masksKM, tauKMsimple, 8)
     #spec = ("M", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2, range(1999, 2021), False, "M")
-    spec = ("M", 2, SinkhornMproto, 8, masksMproto, tauMtrend, 3, range(1999, 2021), False, "Mtrend")
+    spec = ("M", 2, SinkhornMproto, 10, masksMproto, tauMtrend, 5, range(1999, 2021), False, "Mtrend")
     vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim, years, train0, current = spec
     # current = NN.__name__
     tPs, tQs, tMuHat = load_data(vars, dev)
@@ -71,114 +73,76 @@ def main(train = False, noload = False, lbfgs = False,
     hfpath = "./hfdd/"
     load = not noload
     if load:
-        theta0 = torch.load(hfpath + "theta0" + current + ".pt",
+        theta = torch.load(hfpath + "theta" + current + ".pt",
                             weights_only = True, map_location=torch.device(dev))
-        theta1 = torch.load(hfpath + "theta1" + current + ".pt",
-                            weights_only = True, map_location=torch.device(dev))
-        theta2 = torch.load(hfpath + "theta2" + current + ".pt",
-                            weights_only = True, map_location=torch.device(dev))
-        xi0_sd = torch.load(hfpath + "xi0" + current + ".pt",
-                            weights_only = True, map_location=torch.device(dev))
-        xi1_sd = torch.load(hfpath + "xi1" + current + ".pt",
-                            weights_only = True, map_location=torch.device(dev))
-        xi2_sd = torch.load(hfpath + "xi2" + current + ".pt",
+        xi_sd = torch.load(hfpath + "xi" + current + ".pt",
                             weights_only = True, map_location=torch.device(dev))
     else:
-        theta0 = torch.tensor(thetadim * [0.0], dtype=torch.float32,
-                              device=dev, requires_grad = True)
-        theta1 = torch.tensor(thetadim * [0.0], dtype=torch.float32,
-                              device=dev, requires_grad = True)
-        theta2 = torch.tensor(thetadim * [0.0], dtype=torch.float32,
-                              device=dev, requires_grad = True)
+        theta = torch.tensor(thetadim * [0.0], dtype=torch.float32,
+                             device=dev, requires_grad = True)
 
-    network0 = NN(tau, ndim, outdim)
-    network1 = NN(tau, ndim, outdim)
-    network2 = NN(tau, ndim, outdim)
-
+    network = NN(tau, ndim, outdim)
     if load:
-        network0.load_state_dict(xi0_sd)
-        network1.load_state_dict(xi1_sd)
-        network2.load_state_dict(xi2_sd)
-    xi0 = network0.to(dev)
-    xi1 = network1.to(dev)
-    xi2 = network2.to(dev)
+        network.load_state_dict(xi_sd)
+    xi = network.to(dev)
+
     if lbfgs:
-        optim = torch.optim.LBFGS([theta0, theta1, theta2],
+        optim = torch.optim.LBFGS(theta,
                                   lr=.1, max_iter=100,
                                   line_search_fn = 'strong_wolfe')
         num_epochs = 1
     elif neldermead:
-        optim = NelderMeadOptimizer([theta0, theta1, theta2], lr = 1.0)
-        num_epochs = 100
+        optim = NelderMeadOptimizer(theta, lr = 1.0)
+        num_epochs = 500
     else:
-        optim = torch.optim.Adam([theta0, theta1, theta2], lr = .1)
+        optim = torch.optim.Adam(theta, lr = .1)
         num_epochs = 2000
 
     ng = 2**19 # max 2**19 number of draws (uniform gridpoints)
     treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
-    xi0hat, xi1hat, xi2hat = xi0, xi1, xi2
-    theta0hat, theta1hat, theta2hat = theta0, theta1, theta2
+    xihat, thetahat = xi, theta
 
     if train:
 
-        closure, add_outputs = create_closure(xi0, xi1, xi2, theta0, theta1, theta2,
+        closure, add_outputs = create_closure(xi, theta,
                                               tPs, tQs, tMuHat, ng,
                                               dev, tau, masks,
                                               treat_idcs, years, optim, CF.None_, train0)
         torch.set_printoptions(precision = 5, sci_mode=False)
-        columns = ['loss', 'l0', 'l1', 'l2']
-        for i in range(theta0.shape[0]):
-            columns.append(f'theta0{i}')
-        for i in range(theta1.shape[0]):
-            columns.append(f'theta1{i}')
-        for i in range(theta2.shape[0]):
-            columns.append(f'theta2{i}')
+        columns = ['loss', 'l']
+        for i in range(theta.shape[0]):
+            columns.append(f'theta{i}')
         history = pd.DataFrame(index=np.arange(1, num_epochs+1),
                                columns=columns)
 
         losshat = torch.tensor(10e30, device=dev)
         for epoch in range(1, num_epochs + 1):
             loss = optim.step(closure)
-            mush, muss, l0, l1, l2 = add_outputs
-            record = [loss.item(), l0.item(), l1.item(), l2.item()]
-            par0 = theta0.cpu().detach().numpy().flatten()
-            par1 = theta1.cpu().detach().numpy().flatten()
-            par2 = theta2.cpu().detach().numpy().flatten()
+            mush, muss, l = add_outputs
+            record = [loss.item(), l.item()]
+            par = theta.cpu().detach().numpy().flatten()
             if loss < losshat:
                 losshat = loss
-                xi0hat = xi0
-                xi1hat = xi1
-                xi2hat = xi2
-                theta0hat = theta0
-                theta1hat = theta1
-                theta2hat = theta2
+                xihat, thetahat = xi, theta
                 print("Saving tensors")
-                torch.save(theta0hat, hfpath + "theta0" + current + ".pt")
-                torch.save(theta1hat, hfpath + "theta1" + current + ".pt")
-                torch.save(theta2hat, hfpath + "theta2" + current + ".pt")
-                torch.save(xi0hat.state_dict(),
-                           hfpath + "xi0" + current + ".pt")
-                torch.save(xi1hat.state_dict(),
-                           hfpath + "xi1" + current + ".pt")
-                torch.save(xi2hat.state_dict(),
-                           hfpath + "xi2" + current + ".pt")
+                torch.save(thetahat, hfpath + "theta" + current + ".pt")
+                torch.save(xihat.state_dict(),
+                           hfpath + "xi" + current + ".pt")
             else:
                 print("previous loss: {} < loss: {}".format(losshat, loss))
-            record.extend(par0)
-            record.extend(par1)
-            record.extend(par2)
+            record.extend(par)
             history.loc[epoch] = record
             if True: # loss <= losshat:
                 perc = int((epoch / num_epochs) * 100)
                 muss = muss.cpu().detach().numpy()
                 print(f"{TermColours.BRIGHT_RED}{perc}% : {loss.item():.4f} : \
-                        {theta0hat} {theta1hat} {theta2hat}: \
+                        {thetahat}: \
                         {TermColours.GREEN}{muss} \
                         {TermColours.RESET}",
                       end='\t', flush=True)
             history.to_csv('training_history.csv')
 
-        print(theta0hat, theta1hat, theta2hat)
+        print(thetahat)
         print("Done.")
 
 

@@ -65,15 +65,20 @@ def tauMproto(par, dev):
         mbasis(2, 1, 1, dev)))
     return extend(torch.multiply(par.view(-1, 1, 1), b).sum(dim=0))
 
-def tauMtrend(par, t, dev):
+# par = [phi_nn_0(0), phi_cc_0(0), phi_cc_1(0), Δphi_cc_0(1), Δphi_cc_1(1)]
+# where phi_mf_k(d) is utility of couples type mf for k in {0, 1} int/slope
+def tauMtrend(par, t, d, dev):
     b_const = torch.stack((
         mbasis(2, 0, 0, dev),
-        mbasis(2, 1, 1, dev)))
-    b_slope = mbasis(2, 1, 1, dev)
-    p_const = par[0:2].view(-1, 1, 1)
-    p_slope = par[2].view(-1, 1)
+        mbasis(2, 1, 1, dev),
+        d * mbasis(2, 1, 1, dev)))
+    b_slope = torch.stack((
+        mbasis(2, 1, 1, dev),
+        d * mbasis(2, 1, 1, dev)))
+    p_const = par[[0, 1, 3]].view(-1, 1, 1)
+    p_slope = par[[2, 4]].view(-1, 1, 1)
     const = torch.multiply(b_const, p_const).sum(dim = 0)
-    trend = t * torch.multiply(p_slope, b_slope)
+    trend = t * torch.multiply(p_slope, b_slope).sum(dim = 0)
     return extend(const + trend)
 
 # takes 4 parameters
