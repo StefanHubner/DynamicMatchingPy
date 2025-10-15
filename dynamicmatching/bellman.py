@@ -164,6 +164,7 @@ def match_moments(xi, theta, tPs, tQs,
     beta = torch.tensor(0.9, device=dev)
     ts0 = torch.tensor(years, device=dev)
     ts = (ts0 - torch.min(ts0)) / (torch.max(ts0) - torch.min(ts0))
+    print("theta: ", theta.detach().cpu().numpy())
 
     # these won't depend on phi (leaves in the autograd graph)
     # dldTheta is gradient with respect to inner loss function
