@@ -78,7 +78,7 @@ def main(train = False, noload = False, lbfgs = False,
         xi_sd = torch.load(hfpath + "xi" + current + ".pt",
                             weights_only = True, map_location=torch.device(dev))
     else:
-        theta = torch.tensor(thetadim * [0.0], dtype=torch.float32,
+        theta = torch.tensor(thetadim * [0.1], dtype=torch.float32,
                              device=dev, requires_grad = True)
 
     network = NN(tau, ndim, outdim)
@@ -121,6 +121,7 @@ def main(train = False, noload = False, lbfgs = False,
             mush, muss, l = add_outputs
             record = [loss.item(), l.item()]
             par = theta.cpu().detach().numpy().flatten()
+            print("theta_t: {}".format(par))
             if loss < losshat:
                 losshat = loss
                 xihat, thetahat = xi, theta
