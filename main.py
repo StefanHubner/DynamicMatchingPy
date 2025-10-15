@@ -107,7 +107,8 @@ def main(train = False, noload = False, lbfgs = False,
         closure, add_outputs = create_closure(xi, theta,
                                               tPs, tQs, tMuHat, ng,
                                               dev, tau, masks,
-                                              treat_idcs, years, optim, CF.None_, train0)
+                                              treat_idcs, years, optim,
+                                              CF.None_, train0, not neldermead)
         torch.set_printoptions(precision = 5, sci_mode=False)
         columns = ['loss', 'l']
         for i in range(theta.shape[0]):

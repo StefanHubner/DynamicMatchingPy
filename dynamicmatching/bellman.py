@@ -11,8 +11,7 @@ from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF, 
 
 def create_closure(xi, theta, tPs, tQs,
                    tMuHat, ng, dev, tau, masks, treat_idcs, years,
-                   optim, cf, train0):
-    # Use a list as a mutable container
+                   optim, cf, train0, calcgrad = True):
     additional_outputs = [None, None, None]
     def closure():
         optim.zero_grad()
@@ -23,7 +22,8 @@ def create_closure(xi, theta, tPs, tQs,
                                            tau, masks, treat_idcs,
                                            years, skiptrain=False,
                                            cf = cf, train0 = train0)
-        resid.backward()
+        if calcgrad:
+            resid.backward()
         additional_outputs[0] = ssh.detach().cpu()
         additional_outputs[1] = sss.detach().cpu()
         additional_outputs[2] = l.detach().cpu()
