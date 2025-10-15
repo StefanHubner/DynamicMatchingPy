@@ -4,95 +4,81 @@ import numpy as np
 class NelderMeadOptimizer:
     def __init__(self, params, lr=1.0, alpha=1.0, gamma=2.0, rho=0.5, sigma=0.5):
         self.param_groups = [{'params': list(params), 'lr': lr}]
-        self.alpha = alpha  # reflection
-        self.gamma = gamma  # expansion
-        self.rho = rho      # contraction
-        self.sigma = sigma  # shrink
-
-        # Flatten parameters
+        self.alpha, self.gamma, self.rho, self.sigma = alpha, gamma, rho, sigma
         self.shape_info = [(p.shape, p.numel()) for p in self.param_groups[0]['params']]
-        self.dim = sum(s[1] for s in self.shape_info)
+        self.dim = sum(n for _, n in self.shape_info)
 
-        # Initialize simplex
-        self.simplex = []
-        self.f_values = []
-
-        # Initial point
-        x0 = self._flatten_params()
-        self.simplex.append(x0)
-
-        # Create simplex vertices
+        x0 = self._flatten_params().clone()
+        self.simplex = [x0]
         for i in range(self.dim):
             x = x0.clone()
             x[i] += lr
             self.simplex.append(x)
+        self.f_values = []
 
     def zero_grad(self):
         pass
 
     def _flatten_params(self):
-        return torch.cat([p.view(-1) for p in self.param_groups[0]['params']])
+        return torch.cat([p.detach().reshape(-1).clone() for p in self.param_groups[0]['params']])
 
-    def _unflatten_params(self, x):
-        offset = 0
-        for p, (shape, numel) in zip(self.param_groups[0]['params'], self.shape_info):
-            p.data = x[offset:offset+numel].view(shape)
-            offset += numel
+    def _unflatten_params_(self, x):
+        off = 0
+        with torch.no_grad():
+            for p, (shape, n) in zip(self.param_groups[0]['params'], self.shape_info):
+                p.detach().view(-1).copy_(x[off:off+n])
+                off += n
+        return
+
+    def _eval_at(self, x, closure):
+        self._unflatten_params_(x)
+        with torch.no_grad():
+            val = closure()
+            if torch.is_tensor(val):
+                val = float(val.detach().cpu())
+            else:
+                val = float(val)
+        return val
+
+    def _sort_simplex_(self):
+        idx = np.argsort(self.f_values)
+        self.simplex = [self.simplex[i] for i in idx]
+        self.f_values = [self.f_values[i] for i in idx]
 
     def step(self, closure):
-        # Evaluate all vertices if needed
         if len(self.f_values) < len(self.simplex):
-            self.f_values = []
-            for x in self.simplex:
-                self._unflatten_params(x)
-                loss = closure()
-                self.f_values.append(loss.item() if torch.is_tensor(loss) else loss)
+            self.f_values = [self._eval_at(x, closure) for x in self.simplex]
+        self._sort_simplex_()
 
-        # Sort vertices
-        indices = np.argsort(self.f_values)
-        self.simplex = [self.simplex[i] for i in indices]
-        self.f_values = [self.f_values[i] for i in indices]
-
-        # Calculate centroid (excluding worst point)
         centroid = torch.stack(self.simplex[:-1]).mean(dim=0)
-
-        # Reflection
         worst = self.simplex[-1]
+
         reflected = centroid + self.alpha * (centroid - worst)
-        self._unflatten_params(reflected)
-        f_reflected = closure().item()
+        f_ref = self._eval_at(reflected, closure)
 
-        if self.f_values[0] <= f_reflected < self.f_values[-2]:
-            self.simplex[-1] = reflected
-            self.f_values[-1] = f_reflected
-        elif f_reflected < self.f_values[0]:
-            # Expansion
+        if self.f_values[0] <= f_ref < self.f_values[-2]:
+            self.simplex[-1], self.f_values[-1] = reflected, f_ref
+        elif f_ref < self.f_values[0]:
             expanded = centroid + self.gamma * (reflected - centroid)
-            self._unflatten_params(expanded)
-            f_expanded = closure().item()
-
-            if f_expanded < f_reflected:
-                self.simplex[-1] = expanded
-                self.f_values[-1] = f_expanded
+            f_exp = self._eval_at(expanded, closure)
+            if f_exp < f_ref:
+                self.simplex[-1], self.f_values[-1] = expanded, f_exp
             else:
-                self.simplex[-1] = reflected
-                self.f_values[-1] = f_reflected
+                self.simplex[-1], self.f_values[-1] = reflected, f_ref
         else:
-            # Contraction
-            contracted = centroid + self.rho * (worst - centroid)
-            self._unflatten_params(contracted)
-            f_contracted = closure().item()
-
-            if f_contracted < self.f_values[-1]:
-                self.simplex[-1] = contracted
-                self.f_values[-1] = f_contracted
+            contracted = centroid + self.rho * (worst - centroid)  # inside contraction
+            f_con = self._eval_at(contracted, closure)
+            if f_con < self.f_values[-1]:
+                self.simplex[-1], self.f_values[-1] = contracted, f_con
             else:
-                # Shrink
+                best = self.simplex[0]
                 for i in range(1, len(self.simplex)):
-                    self.simplex[i] = self.simplex[0] + self.sigma * (self.simplex[i] - self.simplex[0])
-                self.f_values = [self.f_values[0]]  # Force re-evaluation
+                    self.simplex[i] = best + self.sigma * (self.simplex[i] - best)
+                self.f_values = [self.f_values[0]] + [None]*(len(self.simplex)-1)
+                # re-evaluate all vertices after shrink
+                self.f_values = [self._eval_at(x, closure) for x in self.simplex]
 
-        # Set parameters to best vertex
-        self._unflatten_params(self.simplex[0])
-
+        self._sort_simplex_()
+        self._unflatten_params_(self.simplex[0])
         return torch.tensor(self.f_values[0])
+
