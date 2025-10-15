@@ -87,15 +87,15 @@ def main(train = False, noload = False, lbfgs = False,
     xi = network.to(dev)
 
     if lbfgs:
-        optim = torch.optim.LBFGS(theta,
+        optim = torch.optim.LBFGS([theta],
                                   lr=.1, max_iter=100,
                                   line_search_fn = 'strong_wolfe')
         num_epochs = 1
     elif neldermead:
-        optim = NelderMeadOptimizer(theta, lr = 1.0)
+        optim = NelderMeadOptimizer([theta], lr = 1.0)
         num_epochs = 500
     else:
-        optim = torch.optim.Adam(theta, lr = .1)
+        optim = torch.optim.Adam([theta], lr = .1)
         num_epochs = 2000
 
     ng = 2**19 # max 2**19 number of draws (uniform gridpoints)

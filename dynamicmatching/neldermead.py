@@ -95,5 +95,4 @@ class NelderMeadOptimizer:
         # Set parameters to best vertex
         self._unflatten_params(self.simplex[0])
 
-        return self.f_values[0]
         return torch.tensor(self.f_values[0])
