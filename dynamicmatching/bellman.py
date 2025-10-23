@@ -243,7 +243,7 @@ def match_moments(xi, theta, tPs, tQs,
            #ss_star[i, ] = ss_cur
            #ss_cur = walker(ss_cur)
 
-    resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0,:,:]).sum()
+    resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0:,:,:]).sum()
 
     print("resid: ", resid.detach().cpu().numpy())
 
