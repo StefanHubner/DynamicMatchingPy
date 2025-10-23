@@ -142,7 +142,7 @@ def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
 
 def minimise_inner(xi, theta, beta, tP, tQ, ng, ts, tau, masks, dev):
 
-    epochs = 200
+    epochs = 1000
     optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):

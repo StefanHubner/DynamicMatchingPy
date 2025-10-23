@@ -143,7 +143,7 @@ def main(train = False, noload = False, lbfgs = False,
                         {TermColours.GREEN}{muss - muhat} \
                         {TermColours.RESET}",
                       end='\t', flush=True)
-            history.to_csv('training_history.csv')
+            history.iloc[:epoch].to_csv('training_history.csv')
 
         print(thetahat)
         print("Done.")
