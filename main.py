@@ -93,7 +93,7 @@ def main(train = False, noload = False, lbfgs = False,
         num_epochs = 1
     elif neldermead:
         optim = NelderMeadOptimizer([theta], lr = 1.0)
-        num_epochs = 500
+        num_epochs = 1000
     else:
         optim = torch.optim.Adam([theta], lr = .1)
         num_epochs = 2000
@@ -137,9 +137,10 @@ def main(train = False, noload = False, lbfgs = False,
             if True: # loss <= losshat:
                 perc = int((epoch / num_epochs) * 100)
                 muss = muss.cpu().detach().numpy()
+                muhat = tMuHat.cpu().detach().numpy()
                 print(f"{TermColours.BRIGHT_RED}{perc}% : {loss.item():.4f} : \
                         {thetahat}: \
-                        {TermColours.GREEN}{muss} \
+                        {TermColours.GREEN}{muss - muhat} \
                         {TermColours.RESET}",
                       end='\t', flush=True)
             history.to_csv('training_history.csv')
