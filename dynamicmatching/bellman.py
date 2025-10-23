@@ -73,10 +73,10 @@ def check_mass(mus, s):
     print(f"{TermColours.CYAN} {offdiag:.2f} {TermColours.RESET}", end='')
 
 # Define the residuals function (unconstrained + sinkhorn)
-def residuals(ng0, xi, tPs, tQs, beta, theta, tau, masks, ts, dev):
+def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
 
     maskc, mask0 = masks # maskc now has all information
-    ndim = tPs[0].shape[0]
+    ndim = tP.shape[0]
 
     concentrations = torch.tensor([2.0] * ndim).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
@@ -91,7 +91,8 @@ def residuals(ng0, xi, tPs, tQs, beta, theta, tau, masks, ts, dev):
 
     mus, vcur = xi(st)
     check_mass(mus, s)
-    stnext = choices(mus, rts, rds, tPs[1], tQs[1], dev)
+    # TODO: transition matrix by d or weighted (#of per) comb of them?
+    stnext = choices(mus, rts, rds, tP, tQ, dev)
     _, vnext = xi(stnext)
 
     vmapper = torch.vmap(lambda t, d: tau(theta, t, d, dev), in_dims=(0, 0))
@@ -138,14 +139,14 @@ def residuals(ng0, xi, tPs, tQs, beta, theta, tau, masks, ts, dev):
     return mean_resid_v
 
 
-def minimise_inner(xi, theta, beta, tPs, tQs, ng, ts, tau, masks, dev):
+def minimise_inner(xi, theta, beta, tP, tQ, ng, ts, tau, masks, dev):
 
     epochs = 1000
     optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):
         optimiser.zero_grad()
-        loss = residuals(ng, xi, tPs, tQs, beta, theta, tau, masks, ts, dev)
+        loss = residuals(ng, xi, tP, tQ, beta, theta, tau, masks, ts, dev)
         loss.backward(retain_graph=True)
         optimiser.step()
         if epoch < epochs - 1: # detach gradients in trajectory until (only keep for last)
@@ -164,7 +165,14 @@ def match_moments(xi, theta, tPs, tQs,
     beta = torch.tensor(0.9, device=dev)
     ts0 = torch.tensor(years, device=dev)
     ts = (ts0 - torch.min(ts0)) / (torch.max(ts0) - torch.min(ts0))
-    print("theta: ", theta.detach().cpu().numpy())
+    # print("theta: ", theta.detach().cpu().numpy())
+
+    nT, nty0, nty0 = tMuHat.size()
+
+    # regimes
+    pre = range(0, treat_idcs[0])
+    post = range(treat_idcs[-1] + 1, nT)
+    control_idcs = list(pre) + list(post)
 
     # these won't depend on phi (leaves in the autograd graph)
     # dldTheta is gradient with respect to inner loss function
@@ -172,14 +180,17 @@ def match_moments(xi, theta, tPs, tQs,
     # dl/dxi = 0 by the envelope theorem at xi = xi_opt
     # update: now gradient graph is kept and phi is set to requires_grad
 
+    n0, n1, n2 = int(train0) * len(pre), len(treat_idcs), len(post)
+    tP = (n0 * tPs[0] + n1 * tPs[1] + n2 * tPs[2] ) / (n0 + n1 + n2)
+    tQ = (n0 * tQs[0] + n1 * tQs[1] + n2 * tQs[2] ) / (n0 + n1 + n2)
+
     if not skiptrain:
         xi.train()
-        loss = minimise_inner(xi, theta, beta, tPs, tQs,
+        loss = minimise_inner(xi, theta, beta, tP, tQ,
                               ng, ts, tau, masks, dev)
     else:
         loss = None
 
-    nT, nty0, nty0 = tMuHat.size()
 
     def transition_mu(xi, p, q, cf):
         def step(mus, t, d):
@@ -199,11 +210,6 @@ def match_moments(xi, theta, tPs, tQs,
     tM = tMuHat[:,:-1,:].sum(2)
     tF = tMuHat[:,:,:-1].sum(1)
     ss_hat = torch.cat((tM, tF), dim=1)
-
-    # regimes
-    pre = range(0, treat_idcs[0])
-    post = range(treat_idcs[-1] + 1, nT)
-    control_idcs = list(pre) + list(post)
 
     # initial state
     idx0 = 0 if train0 else treat_idcs[0]
