@@ -42,6 +42,7 @@ def matched_process_plot(mu_hat, mu_star, years, cells, couples, singles):
             ax.axvspan(2001, 2008, color='grey', alpha=0.1, linewidth=0)
             handles.append(line)
             labels.append(f'{prh(k)}')
+        ax.set_ylim(bottom=0)
         ax.legend(handles, labels, fontsize=6,  loc='upper right')
         ax.set_xticks(years[::4])
         ax.set_xticklabels(years[::4], rotation=45, fontsize = 6)

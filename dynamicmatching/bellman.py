@@ -56,12 +56,12 @@ def choices_vectorised(mus, p, q, dev):
          torch.matmul(tMuF.view(-1, q.shape[1]), q.T)],
         dim=1)
 
-def choices(mus, t, d, p, q, dev):
+def choices(mus, t, d, p, q, dt, dev):
     tMuM = mus[:,:-1,:]
     tMuF = mus[:,:,:-1]
     M = torch.einsum('nij,ijk->nk', tMuM, p)
     F = torch.einsum('nij,ijk->nk', tMuF, q)
-    return torch.cat([M, F, t + 1, d], dim = 1)
+    return torch.cat([M, F, t + dt, d], dim = 1)
 
 def check_mass(mus, s):
     ntypes = s.shape[1] // 2
@@ -91,8 +91,9 @@ def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
 
     mus, vcur = xi(st)
     check_mass(mus, s)
+    dt = ts[1] - ts[0]
     # TODO: transition matrix by d or weighted (#of per) comb of them?
-    stnext = choices(mus, rts, rds, tP, tQ, dev)
+    stnext = choices(mus, rts, rds, tP, tQ, dt, dev)
     _, vnext = xi(stnext)
 
     vmapper = torch.vmap(lambda t, d: tau(theta, t, d, dev), in_dims=(0, 0))
@@ -194,7 +195,7 @@ def match_moments(xi, theta, tPs, tQs,
 
     def transition_mu(xi, p, q, cf):
         def step(mus, t, d):
-            sst = choices(mus, t, d, p, q, dev)
+            sst = choices(mus, t, d, p, q, ts[1] - ts[0], dev)
             mus, _ = xi(sst)
             return mus
         def step_household(mus): # not in use
