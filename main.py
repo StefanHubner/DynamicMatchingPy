@@ -167,8 +167,9 @@ def main(train = False, noload = False, lbfgs = False,
         s = st.session_state
         if 'currentyear' not in s: s.currentyear = years[0]
         if 't' not in s: s.t = torch.tensor(0.0).view(1,1)
+        dt = 1.0 / (years[-1] - years[0])
         def update_year():
-            s.t = torch.tensor((s.currentyear - years[0]) / (years[-1] - years[0])).view(1,1)
+            s.t = torch.tensor((s.currentyear - years[0]) * dt).view(1,1)
 
         year = st.sidebar.slider('Year', years[0], years[-1], step=1,
                                   key='currentyear', on_change=update_year)
@@ -253,9 +254,9 @@ def main(train = False, noload = False, lbfgs = False,
 
         torch0 = torch.tensor(0.0, device="cpu").view(1,1)
         mus0, v0 = xi(ss(0))
-        ssnext0 = choices(mus0, s.t, torch0, tPs[2], tQs[2], "cpu")
+        ssnext0 = choices(mus0, s.t, torch0, tPs[2], tQs[2], dt, "cpu")
         mus1, v1 = xi(ss(1))
-        ssnext1 = choices(mus0, s.t, torch0 + 1, tPs[1], tQs[1], "cpu")
+        ssnext1 = choices(mus0, s.t, torch0 + 1, tPs[1], tQs[1], dt, "cpu")
         with sandbox:
             cols = st.columns(2)
             columns_data = zip(cols, [torch0, torch0 + 1])
