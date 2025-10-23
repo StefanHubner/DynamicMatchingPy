@@ -142,7 +142,7 @@ def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
 
 def minimise_inner(xi, theta, beta, tP, tQ, ng, ts, tau, masks, dev):
 
-    epochs = 1000
+    epochs = 200
     optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):
@@ -166,7 +166,7 @@ def match_moments(xi, theta, tPs, tQs,
     beta = torch.tensor(0.9, device=dev)
     ts0 = torch.tensor(years, device=dev)
     ts = (ts0 - torch.min(ts0)) / (torch.max(ts0) - torch.min(ts0))
-    # print("theta: ", theta.detach().cpu().numpy())
+    print("theta: ", theta.detach().cpu().numpy())
 
     nT, nty0, nty0 = tMuHat.size()
 
@@ -244,6 +244,8 @@ def match_moments(xi, theta, tPs, tQs,
            #ss_cur = walker(ss_cur)
 
     resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0,:,:]).sum()
+
+    print("resid: ", resid.detach().cpu().numpy())
 
     torch.cuda.empty_cache()
 
