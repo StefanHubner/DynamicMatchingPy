@@ -219,10 +219,17 @@ def match_moments(xi, theta, tPs, tQs,
     # we recursively define the whole path
     xi.eval()
     transition = transition_mu
+
+    # same transition for all regimes
+    walker_common = transition(xi, tP, tQ, cf)
+
+    # regime spec transition (this is a CF?)
     walker_pre = transition(xi, tPs[0], tQs[0], cf)
     walker_treat = transition(xi, tPs[1], tQs[1], cf)
     walker_post = transition(xi, tPs[2], tQs[2], cf)
-    regimes = ([(pre, walker_pre)] if train0 else []) + [(treat_idcs, walker_treat), (post, walker_post)]
+
+    # regimes = ([(pre, walker_pre)] if train0 else []) + [(treat_idcs, walker_treat), (post, walker_post)]
+    regimes = ([(pre, walker_common)] if train0 else []) + [(treat_idcs, walker_common), (post, walker_common)]
 
     ss_star = torch.zeros(nT, ss_cur.shape[1]).to(dev)
     mu_star = torch.zeros(nT, nty0, nty0).to(dev)
