@@ -36,12 +36,12 @@ def load_data(name, dev):
     return tPs, tQs, tMuHat
 
 def load_mus(xi, theta, tPs, tQs, muh, ng, dev, tau,
-             masks, tis, cf, train0):
-    _, muh1, mus, _, _, _ = match_moments(xi, theta,
-                                          tPs, tQs, muh, ng,
-                                          dev, tau, masks, tis,
-                                          skiptrain = True, cf = cf,
-                                          train0 = train0)
+             masks, tis, years, cf, train0):
+    _, muh1, mus, _ = match_moments(xi, theta,
+                                    tPs, tQs, muh, ng,
+                                    dev, tau, masks, tis, years,
+                                    skiptrain = True, cf = cf,
+                                    train0 = train0)
     return muh1, mus
 
 def main(train = False, noload = False, lbfgs = False,
@@ -74,9 +74,9 @@ def main(train = False, noload = False, lbfgs = False,
     load = not noload
     if load:
         theta = torch.load(hfpath + "theta" + current + ".pt",
-                            weights_only = True, map_location=torch.device(dev))
+                            weights_only = False, map_location=torch.device(dev))
         xi_sd = torch.load(hfpath + "xi" + current + ".pt",
-                            weights_only = True, map_location=torch.device(dev))
+                            weights_only = False, map_location=torch.device(dev))
     else:
         theta = torch.tensor(thetadim * [0.1], dtype=torch.float32,
                              device=dev, requires_grad = True)
@@ -151,23 +151,27 @@ def main(train = False, noload = False, lbfgs = False,
 
     if not train:
 
-        xi0, xi1, xi2 = xi0hat.cpu(), xi1hat.cpu(), xi2hat.cpu()
-        xi0.eval()
-        xi1.eval()
-        xi2.eval()
-        theta0, theta1, theta2 = theta0hat.cpu(), theta1hat.cpu(), theta2hat.cpu()
+        xi = xihat.cpu()
+        xi.eval()
+        theta = thetahat.cpu()
         tPs, tQs = tPs.cpu(), tQs.cpu()
         mu_hat = tMuHat.cpu()
         sandbox, process, raw, net = st.tabs(["Sandbox",
                                               "Matched Processes",
                                               "Raw",
                                               "Network"])
-        _, mu_star = load_mus(xi0, xi1, xi2, theta0, theta1, theta2,
-                              tPs, tQs, mu_hat, ng,
-                              "cpu", tau, masks, treat_idcs,
+        _, mu_star = load_mus(xi, theta, tPs, tQs, mu_hat, ng,
+                              "cpu", tau, masks, treat_idcs, years,
                               cf = CF.None_, train0 = train0)
 
         s = st.session_state
+        if 'currentyear' not in s: s.currentyear = years[0]
+        if 't' not in s: s.t = torch.tensor(0.0).view(1,1)
+        def update_year():
+            s.t = torch.tensor((s.currentyear - years[0]) / (years[-1] - years[0])).view(1,1)
+
+        year = st.sidebar.slider('Year', years[0], years[-1], step=1,
+                                  key='currentyear', on_change=update_year)
         if vars == "KM":
             if 'mn' not in s: s.mn = 0.20
             if 'me' not in s: s.me = 0.03
@@ -219,9 +223,9 @@ def main(train = False, noload = False, lbfgs = False,
             fu = st.sidebar.slider('$F_u$', 0.0, 0.5, step=0.01,
                                    key='fu', on_change=update_fc)
             update_fc()
-            ss = torch.tensor([[s.mu, s.mc, s.fu, s.fc]], device="cpu")
+            ss = lambda d: torch.tensor([[s.mu, s.mc, s.fu, s.fc, s.t, d]], device="cpu")
             hdmu = ['u', 'c', '0']
-            hds = ['M_u', 'M_c', 'F_u', 'F_c']
+            hds = ['M_u', 'M_c', 'F_u', 'F_c', 't', 'd']
             cells = {"uu": (0,0), "cc": (1,1), "u0": (0,2), "0u": (2,0),
                      "c0": (1,2), "0c": (2,1)}
             couples = ["uu", "cc"]
@@ -247,47 +251,50 @@ def main(train = False, noload = False, lbfgs = False,
             couples = ["znzn", "zeze", "zczc", "knkn", "keke", "kckc"]
             singles = ["zn0", "0zn"]
 
-        mus0, v0 = xi0(ss)
-        ssnext0 = choices(mus0, tPs[0], tQs[0], "cpu")
-        mus1, v1 = xi1(ss)
-        ssnext1 = choices(mus1, tPs[1], tQs[1], "cpu")
-        mus2, v2 = xi2(ss)
-        ssnext2 = choices(mus2, tPs[2], tQs[2], "cpu")
+        torch0 = torch.tensor(0.0, device="cpu").view(1,1)
+        mus0, v0 = xi(ss(0))
+        ssnext0 = choices(mus0, s.t, torch0, tPs[2], tQs[2], "cpu")
+        mus1, v1 = xi(ss(1))
+        ssnext1 = choices(mus0, s.t, torch0 + 1, tPs[1], tQs[1], "cpu")
         with sandbox:
-            cols = st.columns(3)
-            columns_data = zip(cols, [theta0, theta1, theta2], range(3))
-            for col, theta, idx in columns_data:
+            cols = st.columns(2)
+            columns_data = zip(cols, [torch0, torch0 + 1])
+            for col, d in columns_data:
                 with col:
-                    st.subheader('$\\Phi(\\widehat{{\\theta}}_{})$'.format(idx))
+                    st.subheader('$\\Phi_{{t}}({})$'.format(int(d.item())))
                     df = pd.DataFrame(
-                        tau(theta, "cpu").detach().numpy(),
+                        tau(theta, s.t, d, "cpu").detach().numpy(),
                         index=hdmu,
                         columns=hdmu
                     )
                     st.dataframe(df)
 
             st.subheader('$\\mu_1$ in %')
-            fmarg = ss[0, ndim:2*ndim].detach().numpy().tolist()
-            mmarg = ss[0, 0:ndim].detach().numpy().tolist()
+            fmarg = ss(1)[0, ndim:2*ndim].detach().numpy().tolist()
+            mmarg = ss(1)[0, 0:ndim].detach().numpy().tolist()
             st.pyplot(create_heatmap(mus1[0]*100,
                        ["{:.1f}".format(f*100) for f in fmarg + [0]],
                        ["{:.1f}".format(m*100) for m in mmarg + [0]]
                                      , hdmu), use_container_width=False)
-            columns_data = zip(cols, [ssnext0, ssnext1, ssnext2], [v0, v1, v2], range(3))
+            columns_data = zip(cols, [ssnext0, ssnext1], [v0, v1], range(2))
             for col, ssnext, v, idx in columns_data:
                 with col:
-                    st.subheader('($M_{{t+1}}^*, F_{{t+1}}^*)_{} $'.format(idx))
+                    st.subheader('($M_{{t+1}}^*, F_{{t+1}}^*) $')
                     df = pd.DataFrame(
                         ssnext.detach().numpy(),
                         columns=hds
                     )
                     st.dataframe(df, hide_index=True)
-                    st.subheader('$V_{}$'.format(idx))
+                    st.subheader('$V$')
                     st.write(v.detach().numpy())
 
         with process:
-            fig, ax1, ax2 = matched_process_plot(mu_hat, mu_star, years,
-                                                 cells, couples, singles)
+            myears = torch.tensor([train0 for _ in range(treat_idcs[0])]
+                                + [True for _ in years[treat_idcs[0]:]])
+            ys = torch.tensor(years)[myears].numpy()
+            fig, ax1, ax2 = matched_process_plot(mu_hat[myears,:,:],
+                                                 mu_star[myears,:,:],
+                                                 ys, cells, couples, singles)
             st.pyplot(fig, use_container_width=False)
             #fig.savefig("matched_processes.pdf", format="pdf",
             #            bbox_inches="tight")

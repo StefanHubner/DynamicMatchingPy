@@ -200,12 +200,15 @@ def match_moments(xi, theta, tPs, tQs,
     tF = tMuHat[:,:,:-1].sum(1)
     ss_hat = torch.cat((tM, tF), dim=1)
 
-    # initial state
-    ss_cur = ss_hat[0, :].view(1, -1)
-    mu_cur = tMuHat[0,:,:].unsqueeze(0)
+    # regimes
     pre = range(0, treat_idcs[0])
     post = range(treat_idcs[-1] + 1, nT)
     control_idcs = list(pre) + list(post)
+
+    # initial state
+    idx0 = 0 if train0 else treat_idcs[0]
+    ss_cur = ss_hat[idx0, :].view(1, -1)
+    mu_cur = tMuHat[idx0,:,:].unsqueeze(0)
 
     # we recursively define the whole path
     xi.eval()
@@ -227,6 +230,7 @@ def match_moments(xi, theta, tPs, tQs,
            #ss_cur = walker(ss_cur)
 
     resid = torch.square(tMuHat - mu_star).sum()
+    # this exagerates loss bc mu_star is zero if train0 = False. Shouldn't matter, constant shift.
 
     torch.cuda.empty_cache()
 
