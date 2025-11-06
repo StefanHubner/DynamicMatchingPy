@@ -110,6 +110,36 @@ class SinkhornMproto(Sinkhorn):
                                                  iter))(stk)
         return mus, V
 
+class SinkhornMS(Sinkhorn):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sinkhorn = margin_projection
+        self.extend = extend
+        self.num_iterations = 25
+
+    def forward(self, margins_td):
+        zs = torch.zeros((margins_td.shape[0], 1),
+                         device = margins_td.device)
+        M = torch.cat((margins_td[:, 0:4], zs), dim=1)
+        F = torch.cat((margins_td[:, 4:8], zs), dim=1)
+        ts = margins_td[:,8]
+        ds = margins_td[:,9]
+        pars = self.layers(margins_td)
+        vmapper = torch.vmap(lambda p, t, d: self.tau(p, t, d, pars.device),
+                             in_dims=(0, 0, 0))
+        muc = vmapper(torch.exp(pars[:, 0:8]), ts, ds)  # pos, t/d-dep!
+        mucm0, muc0f = torch.exp(pars[:, 8:12]), torch.exp(pars[:, 12:16]) # pos!
+        muc[:, :(M.shape[1]-1), -1:] = mucm0.view(-1, (M.shape[1]-1), 1)
+        muc[:, -1:, :(F.shape[1]-1)] = muc0f.view(-1, 1, (F.shape[1]-1))
+        V = torch.exp(pars[:, -1])
+        stk = torch.cat((muc, M.unsqueeze(2), F.unsqueeze(2)), dim=2)
+        iter = self.num_iterations if self.training else 100
+        mus = torch.vmap(lambda p: self.sinkhorn(p[:, 0:5],
+                                                 p[:, 5],
+                                                 p[:, 6],
+                                                 iter))(stk)
+        return mus, V
+
 
 class SinkhornM(Sinkhorn):
     def forward(self, margins):

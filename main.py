@@ -13,10 +13,10 @@ from torchviz import make_dot
 from PIL import Image
 
 from dynamicmatching.bellman import match_moments, create_closure
-from dynamicmatching.helpers import tauMflex, tauKMsimple, tauMproto, tauMtrend, masksM, masksKM, masksMproto, TermColours, CF
+from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStrend, masksM, masksMS, TermColours, CF
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url
 from dynamicmatching.bellman import minimise_inner, choices
-from dynamicmatching.deeplearning import SinkhornM, SinkhornKMsimple, SinkhornMproto, masked_log
+from dynamicmatching.deeplearning import SinkhornM, SinkhornMS, masked_log
 from dynamicmatching.neldermead import NelderMeadOptimizer
 
 st.set_page_config(page_title = "Dynamic Matching")
@@ -27,7 +27,7 @@ st.set_page_config(page_title = "Dynamic Matching")
 @st.cache_resource
 def load_data(name, dev):
     import os
-    token = os.environ.get("HF_TOKEN") # I think HF_TOKEN is used by default
+    token = os.environ.get("HF_TOKEN") # HF_TOKEN is used by default
     login(token=token, add_to_git_credential=True) 
     data = load_dataset("StefanHubner/DivorceData")[name]
     tPs = torch.tensor(data["p"][0], device = dev)
@@ -58,14 +58,12 @@ def main(train = False, noload = False, lbfgs = False,
     torch.autograd.set_detect_anomaly(True)
 
     #Define specification and load appropriate dataset
-    # outdim = par dim + share of unrest. singles for both sx's + value fct
-    # (name, state dim, net definition, outdim, masks, basis, parameter dim)
-    #spec = ("M", 3, SinkhornM, 9, masksM, tauMflex, 4)
-    #spec = ("KM", 6, SinkhornKMsimple, 17, masksKM, tauKMsimple, 8)
-    #spec = ("M", 2, SinkhornMproto, 7, masksMproto, tauMproto, 2, range(1999, 2021), False, "M")
-    spec = ("M", 2, SinkhornMproto, 10, masksMproto, tauMtrend, 5, range(1999, 2021), False, "Mtrend")
+    # outdim = par dim + # of single types + value fct
+    # (name, state dim, net class, outdim, masks, basis, par dim, ys, train0, name)
+    #spec = ("M", 2, SinkhornMproto, 2+(2*2)+1, masksM, tauM, 2, range(1999, 2021), False, "M")
+    spec = ("M", 2, SinkhornM, 5+(2*2)+1, masksM, tauMtrend, 5, range(1999, 2021), False, "Mtrend")
+    spec = ("MS", 4, SinkhornMS, 8+(2*4)+1, masksMS, tauMS, 8, range(1999, 2021), False, "MS")
     vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim, years, train0, current = spec
-    # current = NN.__name__
     tPs, tQs, tMuHat = load_data(vars, dev)
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
@@ -258,6 +256,10 @@ def main(train = False, noload = False, lbfgs = False,
         mus1, v1 = xi(ss(1))
         ssnext1 = choices(mus0, s.t, torch0 + 1, tPs[1], tQs[1], dt, "cpu")
         with sandbox:
+            ps = theta.detach().numpy()
+            st.write("Parameters: " +
+                     ", ".join(["{:.2f}".format(p) for p in ps]))
+
             cols = st.columns(2)
             columns_data = zip(cols, [torch0, torch0 + 1])
             for col, d in columns_data:

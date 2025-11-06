@@ -46,7 +46,7 @@ def mbasis(n, i, j, dev):
     return b
 
 # tau for married only (3x3)
-def tauM(par, treat, dev):
+def tauMold(par, treat, dev):
     theta = par[:-1]
     kappa = par[-1]
     n = theta.shape[0]
@@ -59,7 +59,7 @@ def tauM(par, treat, dev):
     return extend(torch.multiply(rs.view(-1, 1, 1), b).sum(dim=0))
 
 # tau for married new prototype (2x2) 
-def tauMproto(par, dev):
+def tauM(par, dev):
     b = torch.stack((
         mbasis(2, 0, 0, dev),
         mbasis(2, 1, 1, dev)))
@@ -81,7 +81,40 @@ def tauMtrend(par, t, d, dev):
     trend = t * torch.multiply(p_slope, b_slope).sum(dim = 0)
     return extend(const + trend)
 
-# takes 4 parameters
+def tauMS(par, t, d, dev):
+    b_const = torch.stack((
+        mbasis(4, 0, 0, dev),
+        mbasis(4, 1, 1, dev),
+        mbasis(4, 1, 0, dev),
+        mbasis(4, 2, 2, dev),
+        mbasis(4, 3, 3, dev),
+        mbasis(4, 3, 2, dev),
+        d * mbasis(4, 2, 2, dev),
+        d * mbasis(4, 3, 2, dev)))
+    p_const = par[[0, 1, 2, 3, 4, 5, 6, 7]].view(-1, 1, 1)
+    const = torch.multiply(b_const, p_const).sum(dim = 0)
+    return extend(const)
+
+def tauMStrend(par, t, d, dev):
+    b_const = torch.stack((
+        mbasis(4, 0, 0, dev),
+        mbasis(4, 1, 1, dev),
+        mbasis(4, 1, 0, dev),
+        mbasis(4, 2, 2, dev),
+        mbasis(4, 3, 3, dev),
+        mbasis(4, 3, 2, dev),
+        d * mbasis(4, 2, 2, dev),
+        d * mbasis(4, 3, 2, dev)))
+    b_slope = torch.stack((
+        mbasis(4, 3, 2, dev),
+        d * mbasis(4, 3, 2, dev)))
+    p_const = par[[0, 1, 2, 3, 4, 5, 6, 7]].view(-1, 1, 1)
+    p_slope = par[[8, 9]].view(-1, 1, 1)
+    const = torch.multiply(b_const, p_const).sum(dim = 0)
+    trend = t * torch.multiply(p_slope, b_slope).sum(dim = 0)
+    return extend(const + trend)
+
+# takes 4 parameters (old 3x3)
 def tauMflex(par, dev):
     b = torch.stack((
         mbasis(3, 0, 0, dev),
@@ -90,7 +123,7 @@ def tauMflex(par, dev):
         mbasis(3, 2, 2, dev))) # by convention the last one is (c, c)
     return extend(torch.multiply(par.view(-1, 1, 1), b).sum(dim=0))
 
-# takes 8 parameters
+# takes 8 parameters (old 3x3)
 def tauKMsimple(par, dev):
     b = torch.stack((
         mbasis(6, 0, 0, dev), # znzn
@@ -105,27 +138,20 @@ def tauKMsimple(par, dev):
 
 
 
-maskcM = [[True,  True,  False, False],
-          [True,  True,  False, False],
-          [False, False, True,  False],
-          [False, False, False, False]]
-maskcKM = np.kron(np.eye(2), np.matrix(maskcM)[:-1,:-1])
-maskcKM = np.vstack((maskcKM, np.zeros((1, 6))))
-maskcKM = np.hstack((maskcKM, np.zeros((7, 1))))
-maskcKM = (maskcKM==1).tolist()
-
-mask0M = [True, True, False, False]
-mask0KM = [True, True, False, True, True, False, False]
-
-masksKM = (maskcKM, mask0KM)
-masksM = (maskcM, mask0M)
-
-maskcMp = [[True,   False, True],
+maskcM  = [[True,   False, True],
            [False,  True , True],
            [True,   True, False]]
-masks0Mp = [True, True, False]
-masksMproto = (maskcMp, masks0Mp)
+masks0M = [True, True, False]
+masksM  = (maskcM, masks0M)
 
+
+maskcMS = [[True,  False, False, False, True],
+           [True,  True , False, False, True],
+           [False, False, True,  False, True],
+           [False, False, True,  True,  True],
+           [True,  True,  True,  True,  False]]
+masks0MS = [True, True, True, True, False]
+masksMS = (maskcMS, masks0MS)
 
 
 # Function to minimize fb
