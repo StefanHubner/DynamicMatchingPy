@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 from datasets import load_dataset
 from huggingface_hub import login, whoami
 from torchviz import make_dot
-from PIL import Image
 
 from dynamicmatching.bellman import match_moments, create_closure
 from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStrend, masksM, masksMS, TermColours, CF
