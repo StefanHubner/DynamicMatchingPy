@@ -80,7 +80,7 @@ class Sinkhorn(nn.Module):
         print(f"Evaluation mode: training={self.training}")
         return self
 
-class SinkhornMproto(Sinkhorn):
+class SinkhornM(Sinkhorn):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.sinkhorn = margin_projection
@@ -141,7 +141,7 @@ class SinkhornMS(Sinkhorn):
         return mus, V
 
 
-class SinkhornM(Sinkhorn):
+class SinkhornM3x3(Sinkhorn):
     def forward(self, margins):
         M, F = margins[:, 0:3], margins[:, 3:6]
         pars = self.layers(margins)
@@ -168,38 +168,6 @@ class SinkhornM(Sinkhorn):
                                     torch.zeros(F.shape[0], 1, 1,
                                                 device=pars.device)),
                                    dim=2)
-                         ), dim=1)
-        return mus, V
-
-class SinkhornKMsimple(Sinkhorn):
-    def forward(self, margins):
-        M, F = margins[:, 0:6], margins[:, 6:12]
-        pars = self.layers(margins)
-        muc = torch.vmap(lambda p: self.tau(p, pars.device),
-                         in_dims=0)(torch.exp(pars[:, 0:8]))  # positive!
-        sqs = SquashedSigmoid(0.02, 0.98)
-        shm_f, shm_k = sqs(pars[:, 9:11]), sqs(pars[:, 11:13])
-        shf_f, shf_k = sqs(pars[:, 13:15]), sqs(pars[:, 15:17])
-        V = torch.exp(pars[:, -1])
-        ones = torch.ones(M.shape[0], 1, device=pars.device)
-        shm0 = torch.cat((torch.cat((shm_f, ones), dim=1),
-                          torch.cat((shm_k, ones), dim=1)), dim=1)
-        shf0 = torch.cat((torch.cat((shf_f, ones), dim=1),
-                          torch.cat((shf_k, ones), dim=1)), dim=1)
-        mucm0, muc0f = M * shm0, F * shf0  # couples
-        mum0, mu0f = M * (1 - shm0), F * (1 - shf0)  # singles
-        stk = torch.cat((muc, mucm0.view(-1, M.shape[1], 1),
-                         muc0f.view(-1, F.shape[1], 1)), dim=2)
-        iter = self.num_iterations if self.training else 1000
-        muc = torch.vmap(lambda p: self.sinkhorn(p[:, 0:6],
-                                                 p[:, 6],
-                                                 p[:, 7],
-                                                 iter), in_dims=0)(stk)
-        mus = torch.cat((torch.cat((muc, mum0.view(-1, M.shape[1], 1)),
-                                   dim=2),
-                         torch.cat((mu0f.view(-1, 1, F.shape[1]),
-                                    torch.zeros(F.shape[0], 1, 1,
-                                                device=pars.device)), dim=2)
                          ), dim=1)
         return mus, V
 

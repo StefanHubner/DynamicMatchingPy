@@ -2,6 +2,7 @@
 
 import argparse
 import io
+import os
 import torch
 import pandas as pd
 import numpy as np
@@ -26,9 +27,8 @@ st.set_page_config(page_title = "Dynamic Matching")
 
 @st.cache_resource
 def load_data(name, dev):
-    import os
     token = os.environ.get("HF_TOKEN") # HF_TOKEN is used by default
-    login(token=token, add_to_git_credential=True) 
+    login(token=token, add_to_git_credential=True)
     data = load_dataset("StefanHubner/DivorceData")[name]
     tPs = torch.tensor(data["p"][0], device = dev)
     tQs = torch.tensor(data["q"][0], device = dev)
@@ -57,13 +57,18 @@ def main(train = False, noload = False, lbfgs = False,
         dev = "cpu"
     torch.autograd.set_detect_anomaly(True)
 
-    #Define specification and load appropriate dataset
+    # Define specification and load appropriate dataset
     # outdim = par dim + # of single types + value fct
     # (name, state dim, net class, outdim, masks, basis, par dim, ys, train0, name)
-    #spec = ("M", 2, SinkhornMproto, 2+(2*2)+1, masksM, tauM, 2, range(1999, 2021), False, "M")
-    spec = ("M", 2, SinkhornM, 5+(2*2)+1, masksM, tauMtrend, 5, range(1999, 2021), False, "Mtrend")
-    spec = ("MS", 4, SinkhornMS, 8+(2*4)+1, masksMS, tauMS, 8, range(1999, 2021), False, "MS")
-    vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim, years, train0, current = spec
+    current = args.spec
+    spec  = { "Mtrend":
+                ("M", 2, SinkhornM, 5+(2*2)+1, masksM, tauMtrend, 5,
+                 range(1999, 2021), False),
+              "MS": 
+                ("MS", 4, SinkhornMS, 8+(2*4)+1, masksMS, tauMS, 8,
+                 range(1999, 2021), False)
+             }[current]
+    vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim, years, train0 = spec
     tPs, tQs, tMuHat = load_data(vars, dev)
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
@@ -171,58 +176,23 @@ def main(train = False, noload = False, lbfgs = False,
 
         year = st.sidebar.slider('Year', years[0], years[-1], step=1,
                                   key='currentyear', on_change=update_year)
-        if vars == "KM":
-            if 'mn' not in s: s.mn = 0.20
-            if 'me' not in s: s.me = 0.03
-            if 'zn' not in s: s.zn = 0.16
-            if 'ze' not in s: s.ze = 0.03
-            if 'pkc' not in s: s.pkc = 0.7
-            if 'pknc' not in s: s.pknc = 0.1
-            def update_mc():
-                s.mc = 0.5 - s.mn - s.me
 
-            def update_zc():
-                s.zc = s.mc
+        if 'mu' not in s: s.mu = 0.25
+        if 'fu' not in s: s.fu = 0.25
 
-            def update_ze():
-                s.ze = 0.5 - s.zn - s.zc
+        def update_c():
+            s.mc = 0.5 - s.mu
+            s.fc = 0.5 - s.fu
 
-            mn = st.sidebar.slider('$M_n$', 0.0, 0.5, step=0.01,
-                                   key='mn', on_change=update_mc)
-            me = st.sidebar.slider('$M_e$', 0.0, 0.5, step=0.01,
-                                   key='me', on_change=update_mc)
-            update_mc()
-            st.sidebar.slider('$M_c$', 0.0, 0.5, step=0.01,
-                              key='mc', disabled=True, on_change=update_zc)
-            update_zc()
-            zn = st.sidebar.slider('$F_n$', 0.0, 0.5, step=0.01,
-                                   key='zn', on_change=update_ze)
-            update_ze()
-            st.sidebar.slider('$F_e$', 0.0, 0.5, step=0.01,
-                              key='ze', disabled=True)
-            st.sidebar.slider('$F_c$', 0.0, 0.5, step=0.01,
-                              key='zc', disabled=True)
+        mu = st.sidebar.slider('$M_{u}$', 0.0, 0.5, step=0.01,
+                               key='mu', on_change=update_c)
+        fu = st.sidebar.slider('$F_{u}$', 0.0, 0.5, step=0.01,
+                               key='fu', on_change=update_c)
+        update_c()
 
-            st.sidebar.slider('$P(k|c)$', 0.0, 1.0, step=0.01,
-                              key='pkc', disabled=False)
-            st.sidebar.slider('$P(k|\\neg c)$', 0.0, 1.0, step=0.01,
-                              key='pknc', disabled=False)
-        elif vars == "Mproto" or vars == "M":
-            if 'mu' not in s: s.mu = 0.25
-            if 'fu' not in s: s.fu = 0.25
-
-            def update_mc():
-                s.mc = 0.5 - s.mu
-            def update_fc():
-                s.fc = 0.5 - s.fu
-
-            mu = st.sidebar.slider('$M_u$', 0.0, 0.5, step=0.01,
-                                   key='mu', on_change=update_mc)
-            update_mc()
-            fu = st.sidebar.slider('$F_u$', 0.0, 0.5, step=0.01,
-                                   key='fu', on_change=update_fc)
-            update_fc()
-            ss = lambda d: torch.tensor([[s.mu, s.mc, s.fu, s.fc, s.t, d]], device="cpu")
+        if vars == "M":
+            ss = lambda d: torch.tensor([[s.mu, s.mc, s.fu, s.fc, s.t, d]],
+                                        device="cpu")
             hdmu = ['u', 'c', '0']
             hds = ['M_u', 'M_c', 'F_u', 'F_c', 't', 'd']
             cells = {"uu": (0,0), "cc": (1,1), "u0": (0,2), "0u": (2,0),
@@ -230,25 +200,52 @@ def main(train = False, noload = False, lbfgs = False,
             couples = ["uu", "cc"]
             singles = ["u0", "0u", "c0", "0c"]
 
-        if vars == "KM":
-            pk, pz = s.pknc, 1 - s.pknc
-            ss = torch.tensor([[mn*pz, me*pz, s.mc*(1-s.pkc),
-                                mn*pk, me*pk, s.mc*s.pkc,
-                                zn*pz, s.ze*pz, s.zc*(1-s.pkc),
-                                zn*pk, s.ze*pk, s.zc*s.pkc]],
-                              device="cpu")
-            #ss = torch.kron(torch.ones(1, 2, device = "cpu"), ss)
-            #hdmu = ['zn','kn', 'ze', 'ke','zc', 'kc','0']
-            hdmu = ['zn','ze', 'zc', 'kn','ke', 'kc','0']
-            hds = ['M_{zn}','M_{ze}','M_{zc}','M_{kn}',
-                   'M_{ke}','M_{kc}','F_{zn}','F_{ze}',
-                   'F_{zc}','F_{kn}','F_{ke}','F_{kc}']
-            cells = {"znzn":  (0,0), "zeze": (1,1,), "zczc": (2,2),
-                     "kczc": (5,2), "zckc": (2,5), "kckc": (5,5),
-                     "zn0": (0,6), "0zn": (6,0),
-                     "knkn": (3,3), "keke": (4,4)}
-            couples = ["znzn", "zeze", "zczc", "knkn", "keke", "kckc"]
-            singles = ["zn0", "0zn"]
+
+        if vars == "MS":
+            if 'myu' not in s: s.myu = 0.5
+            if 'mhc' not in s: s.mhc = 0.5
+            if 'fyu' not in s: s.fyu = 0.5
+            if 'fhc' not in s: s.fhc = 0.5
+
+            def update_ou():
+                s.mou = 1 - s.myu
+                s.fou = 1 - s.fyu
+            def update_wc():
+                s.mwc = 1 - s.mhc
+                s.fwc = 1 - s.fhc
+
+            st.sidebar.slider('$M_{y|u}$', 0.0, 1.0, step=0.01,
+                              key='myu', on_change=update_ou)
+            update_ou()
+            st.sidebar.slider('$M_{h|c}$', 0.0, 1.0, step=0.01,
+                              key='mhc', on_change=update_wc)
+            update_wc()
+
+            update_c()
+            st.sidebar.slider('$F_{y|u}$', 0.0, 1.0, step=0.01,
+                              key='fyu', on_change=update_ou)
+            update_ou()
+            st.sidebar.slider('$F_{h|c}$', 0.0, 1.0, step=0.01,
+                              key='fhc', on_change=update_wc)
+            update_wc()
+
+            ss = lambda d: torch.tensor([[
+                               s.mu * s.myu, s.mu * (1 - s.myu),
+                               s.mc * s.mhc, s.mc * (1 - s.mhc),
+                               s.fu * s.fyu, s.fu * (1 - s.fyu),
+                               s.fc * s.fhc, s.fc * (1 - s.fhc),
+                               s.t, d]], device="cpu")
+
+            hdmu = ['uy', 'uo', 'ch', 'cw', '0']
+            hds = ['M_{uy}', 'M_{uo}', 'M_{ch}', 'M_{cw}',
+                   'F_{uy}', 'F_{uu}', 'F_{ch}', 'F_{cw}', 't', 'd']
+
+            cells = {"uyuy": (0,0), "uouo": (1,1), "chch": (2,2), "cwcw": (3,3),
+                     "uouy": (1,0), "cwch": (3,2),
+                     "uy0": (0,4), "0uy": (4,0), "uo0": (1,4), "0uo": (4,1),
+                     "ch0": (2,4), "0ch": (4,2), "cw0": (3,4), "0cw": (4,3)}
+            couples = ["uyuy", "uouo", "uouy", "chch", "cwcw", "cwch"]
+            singles = ["uy0", "0uy", "uo0", "0uo", "ch0", "0ch", "cw0", "0cw"]
 
         torch0 = torch.tensor(0.0, device="cpu").view(1,1)
         mus0, v0 = xi(ss(0))
@@ -346,6 +343,10 @@ def main(train = False, noload = False, lbfgs = False,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="options")
+    parser.add_argument("--spec",
+                        type=str,
+                        default="MS",
+                        help="Specification, one of {'Mtrend', 'MS'}.")
     parser.add_argument("--train",
                         action="store_true",
                         help="Set to train the network.")

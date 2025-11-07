@@ -59,7 +59,7 @@ def tauMold(par, treat, dev):
     return extend(torch.multiply(rs.view(-1, 1, 1), b).sum(dim=0))
 
 # tau for married new prototype (2x2) 
-def tauM(par, dev):
+def tauM(par, t, d, dev):
     b = torch.stack((
         mbasis(2, 0, 0, dev),
         mbasis(2, 1, 1, dev)))
