@@ -9,7 +9,7 @@ import numpy as np
 import streamlit as st
 import matplotlib.pyplot as plt
 from datasets import load_dataset
-from huggingface_hub import login, whoami
+from huggingface_hub import login, whoami, hf_hub_download
 from torchviz import make_dot
 
 from dynamicmatching.bellman import match_moments, create_closure
@@ -72,12 +72,17 @@ def main(train = False, noload = False, lbfgs = False,
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
 
-    hfpath = "./hfdd/"
     load = not noload
     if load:
-        theta = torch.load(hfpath + "theta" + current + ".pt",
+        repo = "StefanHubner/DutchDivorce"
+        f = lambda n: hf_hub_download(
+            repo_id = repo,
+            filename = n + current + ".pt",
+            cache_dir = ".hfcache"
+        )
+        theta = torch.load(f("theta"),
                             weights_only = False, map_location=torch.device(dev))
-        xi_sd = torch.load(hfpath + "xi" + current + ".pt",
+        xi_sd = torch.load(f("xi"),
                             weights_only = False, map_location=torch.device(dev))
     else:
         theta = torch.tensor(thetadim * [0.1], dtype=torch.float32,
@@ -119,6 +124,7 @@ def main(train = False, noload = False, lbfgs = False,
                                columns=columns)
 
         losshat = torch.tensor(10e30, device=dev)
+        hfpath = "./hfdd/"
         for epoch in range(1, num_epochs + 1):
             loss = optim.step(closure)
             mush, muss, l = add_outputs

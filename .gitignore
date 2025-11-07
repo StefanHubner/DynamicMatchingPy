@@ -8,3 +8,4 @@ matched_process.pdf
 *.xlsx
 hfdd
 .env
+.hfcache/
