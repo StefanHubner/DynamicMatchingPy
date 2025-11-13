@@ -58,19 +58,20 @@ def main(train = False, noload = False, lbfgs = False,
 
     # Define specification and load appropriate dataset
     # outdim = par dim + # of single types + value fct
-    # (name, state dim, net class, outdim, masks, basis, par dim, ys, train0, name)
+    # (name, state dim, net class, masks, basis, par dim, ys, train0, name)
     current = args.spec
     spec  = { "Mtrend":
-                ("M", 2, SinkhornM, 5+(2*2)+1, masksM, tauMtrend, 5,
+                ("M", 2, SinkhornM, masksM, tauMtrend, 5,
                  range(1999, 2021), False),
               "MS": 
-                ("MS", 4, SinkhornMS, 8+(2*4)+1, masksMS, tauMS, 8,
+                ("MS", 4, SinkhornMS, masksMS, tauMS, 8,
                  range(1999, 2021), False),
               "MStrend": 
-                ("MS", 4, SinkhornMS, 8+(2*4)+1, masksMS, tauMStrend, 9,
+                ("MS", 4, SinkhornMS, masksMS, tauMStrend, 9,
                  range(1999, 2021), False)
              }[current]
-    vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim, years, train0 = spec
+    vars, ndim, NN, (maskc, mask0), tau, thetadim, years, train0 = spec
+    outdim = pardim + 2 * ndim + 1
     tPs, tQs, tMuHat = load_data(vars, dev)
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
