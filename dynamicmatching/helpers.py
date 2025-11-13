@@ -107,7 +107,7 @@ def tauMStrend(par, t, d, dev):
         d * mbasis(4, 3, 2, dev)))
     b_slope = mbasis(4, 0, 0, dev).unsqueeze(0)
     p_const = par[[0, 1, 2, 3, 4, 5, 6, 7]].view(-1, 1, 1)
-    p_slope = par[[8]].view(-1, 1, 1)
+    p_slope = par[8].view(-1, 1, 1)
     const = torch.multiply(b_const, p_const).sum(dim = 0)
     trend = t * torch.multiply(p_slope, b_slope).sum(dim = 0)
     return extend(const + trend)

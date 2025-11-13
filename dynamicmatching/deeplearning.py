@@ -51,11 +51,15 @@ def margin_projection(mu, M, F, iterations=20, epsilon=1e-8, tol=1e-6):
     return current_mu
 
 class Sinkhorn(nn.Module):
-    def __init__(self, tau, ndim, output_dim,
+    def __init__(self, tau, ndim, output_dim, thetadim,
                  hidden_layers=[32, 16], num_iterations=10):
         super(Sinkhorn, self).__init__()
         self.input_dim = 2 * ndim + 2 # margins + time + treatment
         self.output_dim = output_dim
+        self.theta_dim = thetadim
+        self.ti = range(self.theta_dim)
+        self.m0i = range(self.theta_dim, self.theta_dim + ndim)
+        self.f0i = range(self.theta_dim + ndim, self.theta_dim + 2*ndim)
         self.tau = tau
         self.sinkhorn = sinkhorn_knopp
         self.num_iterations = num_iterations
@@ -97,8 +101,9 @@ class SinkhornM(Sinkhorn):
         pars = self.layers(margins_td)
         vmapper = torch.vmap(lambda p, t, d: self.tau(p, t, d, pars.device),
                              in_dims=(0, 0, 0))
-        muc = vmapper(torch.exp(pars[:, 0:5]), ts, ds)  # positive, t/d-dep!
-        mucm0, muc0f = torch.exp(pars[:, 5:7]), torch.exp(pars[:, 7:9]) # positive!
+        muc = vmapper(torch.exp(pars[:, self.ti]), ts, ds)  # positive, t/d-dep!
+        mucm0 = torch.exp(pars[:, self.m0i])
+        muc0f = torch.exp(pars[:, self.f0i]) # positive!
         muc[:, :(M.shape[1]-1), -1:] = mucm0.view(-1, (M.shape[1]-1), 1)
         muc[:, -1:, :(F.shape[1]-1)] = muc0f.view(-1, 1, (F.shape[1]-1))
         V = torch.exp(pars[:, -1])
@@ -127,8 +132,9 @@ class SinkhornMS(Sinkhorn):
         pars = self.layers(margins_td)
         vmapper = torch.vmap(lambda p, t, d: self.tau(p, t, d, pars.device),
                              in_dims=(0, 0, 0))
-        muc = vmapper(torch.exp(pars[:, 0:8]), ts, ds)  # pos, t/d-dep!
-        mucm0, muc0f = torch.exp(pars[:, 8:12]), torch.exp(pars[:, 12:16]) # pos!
+        muc = vmapper(torch.exp(pars[:, self.ti]), ts, ds)  # pos, t/d-dep!
+        mucm0 = torch.exp(pars[:, self.m0i]) # pos!
+        muc0f = torch.exp(pars[:, self.f0i]) # pos!
         muc[:, :(M.shape[1]-1), -1:] = mucm0.view(-1, (M.shape[1]-1), 1)
         muc[:, -1:, :(F.shape[1]-1)] = muc0f.view(-1, 1, (F.shape[1]-1))
         V = torch.exp(pars[:, -1])

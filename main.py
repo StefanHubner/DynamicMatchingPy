@@ -92,7 +92,7 @@ def main(train = False, noload = False, lbfgs = False,
         theta = torch.tensor(thetadim * [0.1], dtype=torch.float32,
                              device=dev, requires_grad = True)
 
-    network = NN(tau, ndim, outdim)
+    network = NN(tau, ndim, outdim, thetadim)
     if load:
         network.load_state_dict(xi_sd)
     xi = network.to(dev)
