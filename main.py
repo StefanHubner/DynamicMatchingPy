@@ -71,7 +71,7 @@ def main(train = False, noload = False, lbfgs = False,
                  range(1999, 2021), False)
              }[current]
     vars, ndim, NN, (maskc, mask0), tau, thetadim, years, train0 = spec
-    outdim = pardim + 2 * ndim + 1
+    outdim = thetadim + 2 * ndim + 1
     tPs, tQs, tMuHat = load_data(vars, dev)
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
