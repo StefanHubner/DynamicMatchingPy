@@ -65,6 +65,9 @@ def main(train = False, noload = False, lbfgs = False,
                  range(1999, 2021), False),
               "MS": 
                 ("MS", 4, SinkhornMS, 8+(2*4)+1, masksMS, tauMS, 8,
+                 range(1999, 2021), False),
+              "MStrend": 
+                ("MS", 4, SinkhornMS, 8+(2*4)+1, masksMS, tauMStrend, 9,
                  range(1999, 2021), False)
              }[current]
     vars, ndim, NN, outdim, (maskc, mask0), tau, thetadim, years, train0 = spec
