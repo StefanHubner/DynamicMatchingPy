@@ -13,10 +13,10 @@ from huggingface_hub import login, whoami, hf_hub_download
 from torchviz import make_dot
 
 from dynamicmatching.bellman import match_moments, create_closure
-from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStrend, masksM, masksMS, TermColours, CF
+from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url
 from dynamicmatching.bellman import minimise_inner, choices
-from dynamicmatching.deeplearning import SinkhornM, SinkhornMS, masked_log
+from dynamicmatching.deeplearning import SinkhornM, SinkhornMS, SinkhornKMS, masked_log
 from dynamicmatching.neldermead import NelderMeadOptimizer
 
 st.set_page_config(page_title = "Dynamic Matching")
@@ -60,17 +60,18 @@ def main(train = False, noload = False, lbfgs = False,
     # outdim = par dim + # of single types + value fct
     # (name, state dim, net class, masks, basis, par dim, ys, train0, name)
     current = args.spec
+
     spec  = { "Mtrend":
                 ("M", 2, SinkhornM, masksM, tauMtrend, 5,
                  range(1999, 2021), False),
-              "MS": 
+              "MS":
                 ("MS", 4, SinkhornMS, masksMS, tauMS, 8,
                  range(1999, 2021), False),
-              "MStrend": 
+              "MStrend":
                 ("MS", 4, SinkhornMS, masksMS, tauMStrend, 9,
                  range(1999, 2021), False),
-              "KMS": 
-                ("MS", 8, SinkhornKMS, masksKMS, tauKMS, 9,
+              "KMS":
+                ("KMS", 8, SinkhornGeneric, masksKMS, tauKMS, 12,
                  range(1999, 2021), False)
              }[current]
     vars, ndim, NN, (maskc, mask0), tau, thetadim, years, train0 = spec

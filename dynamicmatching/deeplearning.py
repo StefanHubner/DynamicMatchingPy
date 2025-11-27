@@ -54,6 +54,7 @@ class Sinkhorn(nn.Module):
     def __init__(self, tau, ndim, output_dim, thetadim,
                  hidden_layers=[32, 16], num_iterations=10):
         super(Sinkhorn, self).__init__()
+        self.ndim = ndim
         self.input_dim = 2 * ndim + 2 # margins + time + treatment
         self.output_dim = output_dim
         self.theta_dim = thetadim
@@ -84,7 +85,7 @@ class Sinkhorn(nn.Module):
         print(f"Evaluation mode: training={self.training}")
         return self
 
-class SinkhornM(Sinkhorn):
+class SinkhornGeneric(Sinkhorn):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.sinkhorn = margin_projection
@@ -94,14 +95,14 @@ class SinkhornM(Sinkhorn):
     def forward(self, margins_td):
         zs = torch.zeros((margins_td.shape[0], 1),
                          device = margins_td.device)
-        M = torch.cat((margins_td[:, 0:2], zs), dim=1)
-        F = torch.cat((margins_td[:, 2:4], zs), dim=1)
-        ts = margins_td[:,4]
-        ds = margins_td[:,5]
+        M = torch.cat((margins_td[:, range(self.ndim)], zs), dim=1)
+        F = torch.cat((margins_td[:, range(self.ndim*2)], zs), dim=1)
+        ts = margins_td[:,(2*self.ndim)]
+        ds = margins_td[:,(2*self.ndim+1)]
         pars = self.layers(margins_td)
         vmapper = torch.vmap(lambda p, t, d: self.tau(p, t, d, pars.device),
                              in_dims=(0, 0, 0))
-        muc = vmapper(torch.exp(pars[:, self.ti]), ts, ds)  # positive, t/d-dep!
+        muc = vmapper(torch.exp(pars[:, self.ti]), ts, ds)  # pos, t/d!
         mucm0 = torch.exp(pars[:, self.m0i])
         muc0f = torch.exp(pars[:, self.f0i]) # positive!
         muc[:, :(M.shape[1]-1), -1:] = mucm0.view(-1, (M.shape[1]-1), 1)
@@ -109,12 +110,13 @@ class SinkhornM(Sinkhorn):
         V = torch.exp(pars[:, -1])
         stk = torch.cat((muc, M.unsqueeze(2), F.unsqueeze(2)), dim=2)
         iter = self.num_iterations if self.training else 100
-        mus = torch.vmap(lambda p: self.sinkhorn(p[:, 0:3],
-                                                 p[:, 3],
-                                                 p[:, 4],
+        mus = torch.vmap(lambda p: self.sinkhorn(p[:,range(self.ndim+1)],
+                                                 p[:,(self.ndim+1)],
+                                                 p[:,(self.ndim+2)],
                                                  iter))(stk)
         return mus, V
 
+# Should now be deprecated in favor of SinkhornGeneric
 class SinkhornMS(Sinkhorn):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -147,6 +149,7 @@ class SinkhornMS(Sinkhorn):
         return mus, V
 
 
+# Old proportion of singles management, deprecated
 class SinkhornM3x3(Sinkhorn):
     def forward(self, margins):
         M, F = margins[:, 0:3], margins[:, 3:6]

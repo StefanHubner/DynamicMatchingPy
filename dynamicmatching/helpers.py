@@ -95,6 +95,26 @@ def tauMS(par, t, d, dev):
     const = torch.multiply(b_const, p_const).sum(dim = 0)
     return extend(const)
 
+def tauKMS(par, t, d, dev):
+    b_const = torch.stack((
+        mbasis(8, 0, 0, dev),
+        mbasis(8, 1, 1, dev),
+        mbasis(8, 2, 2, dev),
+        mbasis(8, 3, 3, dev),
+        mbasis(8, 4, 4, dev),
+        mbasis(8, 5, 5, dev),
+        mbasis(8, 5, 4, dev),
+        mbasis(8, 6, 6, dev),
+        mbasis(8, 7, 7, dev),
+        mbasis(8, 7, 6, dev),
+        d * mbasis(8, 7, 7, dev),
+        d * mbasis(8, 7, 6, dev)))
+    idcs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    p_const = par[idcs].view(-1, 1, 1)
+    const = torch.multiply(b_const, p_const).sum(dim = 0)
+    return extend(const)
+
+
 def tauMStrend(par, t, d, dev):
     b_const = torch.stack((
         mbasis(4, 0, 0, dev),
@@ -150,6 +170,36 @@ maskcMS = [[True,  False, False, False, True],
            [True,  True,  True,  True,  False]]
 masks0MS = [True, True, True, True, False]
 masksMS = (maskcMS, masks0MS)
+
+maskcKMS = \
+[[True,  False, False, False, False, False, False, False, True],
+ [False, True,  False, False, False, False, False, False, True],
+ [False, False, True,  False, False, False, False, False, True],
+ [False, False, False,  True, False, False, False, False, True],
+ [False, False, False, False, True,  False, False, False, True],
+ [False, False, False, False, True,  True,  False, False, True],
+ [False, False, False, False, False, False, True,  False, True],
+ [False, False, False, False, False, False, True,  True,  True],
+ [True,  True,  True,  True,  True,  True,  True,  True,  False]]
+masks0KMS = \
+ [True,  True,  True,  True,  True,  True,  True,  True,  False]
+masksKMS = (maskcKMS, masks0KMS)
+
+# Function to minimize fb
+def minfb(a, b):
+    return a + b - torch.sqrt(a**2 + b**2 + 1e-8)
+
+
+class ManualLRScheduler:
+    def __init__(self, optimizer, factor=0.1, min_lr=1e-8):
+        self.optimizer = optimizer
+        self.factor = factor
+        self.min_lr = min_lr
+
+    def step(self):
+        for param_group in self.optimizer.param_groups:
+            new_lr = max(param_group['lr'] * self.factor, self.min_lr)
+            param_group['lr'] = new_lr
 
 
 # Function to minimize fb
