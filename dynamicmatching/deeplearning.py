@@ -96,7 +96,7 @@ class SinkhornGeneric(Sinkhorn):
         zs = torch.zeros((margins_td.shape[0], 1),
                          device = margins_td.device)
         M = torch.cat((margins_td[:, range(self.ndim)], zs), dim=1)
-        F = torch.cat((margins_td[:, range(self.ndim*2)], zs), dim=1)
+        F = torch.cat((margins_td[:, range(self.ndim, self.ndim*2)], zs), dim=1)
         ts = margins_td[:,(2*self.ndim)]
         ds = margins_td[:,(2*self.ndim+1)]
         pars = self.layers(margins_td)

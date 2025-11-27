@@ -16,7 +16,7 @@ from dynamicmatching.bellman import match_moments, create_closure
 from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url
 from dynamicmatching.bellman import minimise_inner, choices
-from dynamicmatching.deeplearning import SinkhornM, SinkhornMS, SinkhornKMS, masked_log
+from dynamicmatching.deeplearning import SinkhornGeneric, SinkhornMS, masked_log
 from dynamicmatching.neldermead import NelderMeadOptimizer
 
 st.set_page_config(page_title = "Dynamic Matching")
@@ -62,7 +62,7 @@ def main(train = False, noload = False, lbfgs = False,
     current = args.spec
 
     spec  = { "Mtrend":
-                ("M", 2, SinkhornM, masksM, tauMtrend, 5,
+                ("M", 2, SinkhornGeneric, masksM, tauMtrend, 5,
                  range(1999, 2021), False),
               "MS":
                 ("MS", 4, SinkhornMS, masksMS, tauMS, 8,
