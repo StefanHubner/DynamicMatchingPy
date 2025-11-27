@@ -6,7 +6,6 @@ from datasets import Dataset, DatasetDict, load_dataset
 import json
 import torch
 
-file_path = ''
 file_path = './250710_0500__RES_07_09_for_export_aangepast.xls'
 
 def couplings_old():
@@ -146,19 +145,21 @@ reduce_trans_to_kids = lambda ts: reduce_trans_to_old(ts, [0, 1, 3], 2)
 reduce_to_kids_marriage = lambda d1: reduce_to_old(d1, [0, 1], 6)
 reduce_trans_to_kids_marriage = lambda ts: reduce_trans_to_old(ts, [0, 1], 6)
 
-# new reducers
+# new reducers (NEKMS)
 reduce_to = lambda d1, so, ntypes: reduce_to_ho([2] * 5, d1, so, ntypes)
 reduce_trans_to = lambda d1, so, ntypes: reduce_trans_to_ho([2] * 5, d1, so, ntypes)
 reduce_to_marriage = lambda d1: reduce_to(d1, [0, 1, 2, 4], 2)
 reduce_trans_to_marriage = lambda d1: reduce_trans_to(d1, [0, 1, 2, 4], 2)
 reduce_to_marriage_spec = lambda d1: reduce_to(d1, [0, 1, 2], 4)
 reduce_trans_to_marriage_spec = lambda d1: reduce_trans_to(d1, [0, 1, 2], 4)
+reduce_to_kids_marriage= lambda d1: reduce_to(d1, [0, 1, 4], 4)
+reduce_trans_to_kids_marriage= lambda d1: reduce_trans_to(d1, [0, 1, 4], 4)
 reduce_to_kids_marriage_spec = lambda d1: reduce_to(d1, [0, 1], 8)
 reduce_trans_to_kids_marriage_spec = lambda d1: reduce_trans_to(d1, [0, 1], 8)
 
 # for debug
-red = reduce_to_kids_marriage_spec
-tsred = reduce_trans_to_kids_marriage_spec
+red = reduce_to_kids_marriage
+tsred = reduce_trans_to_kids_marriage
 
 def block_diagonal(tensor):
     i, j, k = tensor.shape  # (33, 32, 8)
