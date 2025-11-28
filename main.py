@@ -81,7 +81,7 @@ def main(train = False, noload = False, lbfgs = False,
     vars, ndim, (maskc, mask0), tau, thetadim, years, train0 = spec
     outdim = thetadim + 2 * ndim + 1
     tPs, tQs, tMuHat, ee = load_data(vars, dev)
-    netflow = 1 - (ee * torch.tensor([1,-1]).unsqueeze(0)).sum(1)
+    netflow = 1 - (ee * torch.tensor([1,-1], device = dev).unsqueeze(0)).sum(1)
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
 

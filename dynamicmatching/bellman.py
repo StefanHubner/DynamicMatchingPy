@@ -62,9 +62,8 @@ def choices(mus, t, d, p, q, netflow, dt, dev):
     M = torch.einsum('nij,ijk->nk', tMuM, p)
     F = torch.einsum('nij,ijk->nk', tMuF, q)
     Sincumb = torch.cat([M, F], dim=1)
-    nf2 = torch.cat([netflow, netflow]).unsqueeze(dim=1)
+    nf2 = torch.cat([netflow, netflow]).unsqueeze(dim=0)
     S = Sincumb * nf2 / (nf2 * Sincumb).sum()
-    F *= netflow / (netflow @ F)
     return torch.cat([S, t + dt, d], dim = 1)
 
 def check_mass(mus, s):
@@ -88,7 +87,7 @@ def residuals(ng0, xi, tP, tQ, netflow,
     pm = 0.5 + (torch.rand((ng0, 1), device = dev) - 0.5) / 5
     s0 = torch.cat((dirichlet.sample((ng0, )) * pm,
                     dirichlet.sample((ng0, )) * (1-pm)), dim = 1)
-    s = s0[torch.all(s0 > 0.04, dim=1)]
+    s = s0[torch.all(s0 > 0.01, dim=1)] # 0.04 works
     ng = s.shape[0]
     rts = ts[torch.randint(0, ts.numel(), (ng, 1))]
     rds = torch.randint(0, 2, (ng, 1), device = dev)
