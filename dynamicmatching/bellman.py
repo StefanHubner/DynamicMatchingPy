@@ -9,16 +9,16 @@ import sys
 from .deeplearning import masked_log
 from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF, extend
 
-def create_closure(xi, theta, tPs, tQs,
-                   tMuHat, ng, dev, tau, masks, treat_idcs, years,
+def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
+                   ng, dev, tau, masks, treat_idcs, years,
                    optim, cf, train0, calcgrad = True):
     additional_outputs = [None, None, None]
     def closure():
         optim.zero_grad()
         resid, ssh, sss, l = match_moments(xi,
                                            theta,
-                                           tPs, tQs,
-                                           tMuHat, ng, dev,
+                                           tPs, tQs, tMuHat, 
+                                           netflow, ng, dev,
                                            tau, masks, treat_idcs,
                                            years, skiptrain=False,
                                            cf = cf, train0 = train0)
@@ -56,12 +56,16 @@ def choices_vectorised(mus, p, q, dev):
          torch.matmul(tMuF.view(-1, q.shape[1]), q.T)],
         dim=1)
 
-def choices(mus, t, d, p, q, dt, dev):
+def choices(mus, t, d, p, q, netflow, dt, dev):
     tMuM = mus[:,:-1,:]
     tMuF = mus[:,:,:-1]
     M = torch.einsum('nij,ijk->nk', tMuM, p)
     F = torch.einsum('nij,ijk->nk', tMuF, q)
-    return torch.cat([M, F, t + dt, d], dim = 1)
+    Sincumb = torch.cat([M, F], dim=1)
+    nf2 = torch.cat([netflow, netflow]).unsqueeze(dim=1)
+    S = Sincumb * nf2 / (nf2 * Sincumb).sum()
+    F *= netflow / (netflow @ F)
+    return torch.cat([S, t + dt, d], dim = 1)
 
 def check_mass(mus, s):
     ntypes = s.shape[1] // 2
@@ -73,7 +77,8 @@ def check_mass(mus, s):
     print(f"{TermColours.CYAN} {offdiag:.2f} {TermColours.RESET}", end='')
 
 # Define the residuals function (unconstrained + sinkhorn)
-def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
+def residuals(ng0, xi, tP, tQ, netflow,
+              beta, theta, tau, masks, ts, dev):
 
     maskc, mask0 = masks # maskc now has all information
     ndim = tP.shape[0]
@@ -93,7 +98,7 @@ def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
     check_mass(mus, s)
     dt = ts[1] - ts[0]
     # TODO: transition matrix by d or weighted (#of per) comb of them?
-    stnext = choices(mus, rts, rds, tP, tQ, dt, dev)
+    stnext = choices(mus, rts, rds, tP, tQ, netflow, dt, dev)
     _, vnext = xi(stnext)
 
     vmapper = torch.vmap(lambda t, d: tau(theta, t, d, dev), in_dims=(0, 0))
@@ -140,14 +145,16 @@ def residuals(ng0, xi, tP, tQ, beta, theta, tau, masks, ts, dev):
     return mean_resid_v
 
 
-def minimise_inner(xi, theta, beta, tP, tQ, ng, ts, tau, masks, dev):
+def minimise_inner(xi, theta, beta, tP, tQ, netflow,
+                   ng, ts, tau, masks, dev):
 
     epochs = 1000
     optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):
         optimiser.zero_grad()
-        loss = residuals(ng, xi, tP, tQ, beta, theta, tau, masks, ts, dev)
+        loss = residuals(ng, xi, tP, tQ, netflow,
+                         beta, theta, tau, masks, ts, dev)
         loss.backward(retain_graph=True)
         optimiser.step()
         if epoch < epochs - 1: # detach gradients in trajectory until (only keep for last)
@@ -159,8 +166,8 @@ def minimise_inner(xi, theta, beta, tP, tQ, ng, ts, tau, masks, dev):
                   end='\t', flush = "True")
     return loss
 
-def match_moments(xi, theta, tPs, tQs,
-                  tMuHat, ng, dev, tau, masks, treat_idcs, years,
+def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
+                  ng, dev, tau, masks, treat_idcs, years,
                   skiptrain = False, cf = CF.None_, train0 = True):
 
     beta = torch.tensor(0.9, device=dev)
@@ -187,7 +194,7 @@ def match_moments(xi, theta, tPs, tQs,
 
     if not skiptrain:
         xi.train()
-        loss = minimise_inner(xi, theta, beta, tP, tQ,
+        loss = minimise_inner(xi, theta, beta, tP, tQ, netflow,
                               ng, ts, tau, masks, dev)
     else:
         loss = None
@@ -195,7 +202,7 @@ def match_moments(xi, theta, tPs, tQs,
 
     def transition_mu(xi, p, q, cf):
         def step(mus, t, d):
-            sst = choices(mus, t, d, p, q, ts[1] - ts[0], dev)
+            sst = choices(mus, t, d, p, q, netflow, ts[1] - ts[0], dev)
             mus, _ = xi(sst)
             return mus
         def step_household(mus): # not in use

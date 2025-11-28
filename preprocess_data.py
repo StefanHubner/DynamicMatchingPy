@@ -78,6 +78,32 @@ t.index
 t.columns
 t
 
+def entryexit() -> pd.DataFrame:
+    n = 'demographics'
+    index_names = pd.read_excel(
+        file_path,
+        sheet_name=n,
+        header=None,
+        skiprows=1,
+        nrows=1,
+        usecols="A:E"
+    ).iloc[0].tolist()
+    df = pd.read_excel(
+        file_path,
+        sheet_name = n,
+        header=[0],  # Multi-header rows
+        index_col=[0, 1, 2, 3, 4],  # Multi-index from first 5 columns
+        skiprows=1 # Skip top 1 empty rows
+    ).fillna(0.0)
+    df.index.names = index_names
+    return df
+
+ee = entryexit()
+ee.index
+ee.columns
+ee
+
+
 def trans_tensor(sex: str, i: int) -> torch.Tensor:
     raw = torch.tensor(trans(sex, i).values, dtype=torch.float32)
     diag = block_diagonal(raw.reshape((33, 32, 8))).reshape(33*32, 32)
@@ -88,6 +114,12 @@ def trans_tensor_old(sex: str, i: int) -> torch.Tensor:
 
 def offset(lst, offs):
     return [(x + offs) for x in lst]
+
+def reduce_ee_to_ho(dims, d1, so, ntypes):
+    n = d1.shape[1]
+    srow = torch.tensor(d1[:np.prod(dims), :]).view([*dims, 2]) #2 for ee
+    s = torch.sum(srow, dim=so).view((ntypes, 2)) # .view([2, ntypes])
+    return s.detach().numpy()
 
 def reduce_to_ho(dims, d1, so, ntypes):
     n = d1.shape[1]
@@ -148,18 +180,23 @@ reduce_trans_to_kids_marriage = lambda ts: reduce_trans_to_old(ts, [0, 1], 6)
 # new reducers (NEKMS)
 reduce_to = lambda d1, so, ntypes: reduce_to_ho([2] * 5, d1, so, ntypes)
 reduce_trans_to = lambda d1, so, ntypes: reduce_trans_to_ho([2] * 5, d1, so, ntypes)
+reduce_ee_to = lambda d1, so, ntypes: reduce_ee_to_ho([2] * 5, d1, so, ntypes)
 reduce_to_marriage = lambda d1: reduce_to(d1, [0, 1, 2, 4], 2)
 reduce_trans_to_marriage = lambda d1: reduce_trans_to(d1, [0, 1, 2, 4], 2)
+reduce_ee_to_marriage = lambda d1: reduce_ee_to(d1, [0, 1, 2, 4], 2)
 reduce_to_marriage_spec = lambda d1: reduce_to(d1, [0, 1, 2], 4)
 reduce_trans_to_marriage_spec = lambda d1: reduce_trans_to(d1, [0, 1, 2], 4)
+reduce_ee_to_marriage_spec = lambda d1: reduce_ee_to(d1, [0, 1, 2], 4)
 reduce_to_kids_marriage= lambda d1: reduce_to(d1, [0, 1, 4], 4)
 reduce_trans_to_kids_marriage= lambda d1: reduce_trans_to(d1, [0, 1, 4], 4)
 reduce_to_kids_marriage_spec = lambda d1: reduce_to(d1, [0, 1], 8)
 reduce_trans_to_kids_marriage_spec = lambda d1: reduce_trans_to(d1, [0, 1], 8)
+reduce_ee_to_kids_marriage_spec = lambda d1: reduce_ee_to(d1, [0, 1], 8)
 
 # for debug
-red = reduce_to_kids_marriage
-tsred = reduce_trans_to_kids_marriage
+red = reduce_to_marriage_spec
+tsred = reduce_trans_to_marriage_spec
+eered = reduce_ee_to_marriage_spec
 
 def block_diagonal(tensor):
     i, j, k = tensor.shape  # (33, 32, 8)
@@ -191,19 +228,23 @@ def normalise_tensor(tensor):
     muhat_0f = tensor[:, -1, :(l-1)]
     nhat = 2 * torch.sum(muhat_mf, dim=(1, 2)) + torch.sum(muhat_m0, dim=1) + torch.sum(muhat_0f, dim=1)
     nhat = nhat.view(-1, 1, 1)
-    return tensor / nhat
+    return tensor / nhat, nhat.flatten()
 
-def data(red, tsred, ntypes):
+def data(red, tsred, eered, ntypes):
     block = couplings()
+    ee = entryexit()
     matchhat = torch.tensor(block.values, dtype=torch.float32).reshape(22, 33, 33)
     redmhat = torch.stack([torch.tensor(red(m)) for m in matchhat])
-    muhat = normalise_tensor(redmhat)
+    muhat, nhat = normalise_tensor(redmhat)
+    eehat = torch.tensor(eered(ee.values)) / nhat.mean()
+    ng = nhat[1:] / nhat[:-1] - 1
     p_pre, q_pre   = tt_tensor(1, ntypes, tsred)
     p, q           = tt_tensor(2, ntypes, tsred)
     p_post, q_post = tt_tensor(3, ntypes, tsred)
     return Dataset.from_dict({'p': [np.stack([p_pre, p, p_post])],
                               'q': [np.stack([q_pre, q, q_post])],
-                              'couplings': [muhat]})
+                              'couplings': [muhat],
+                              'entryexit': [eehat]})
 
 def data_old(red, tsred, ntypes):
     block = couplings_old()
@@ -215,7 +256,8 @@ def data_old(red, tsred, ntypes):
     p_post, q_post = tt_tensor_old(3, ntypes, tsred)
     return Dataset.from_dict({'p': [np.stack([p_pre, p, p_post])],
                               'q': [np.stack([q_pre, q, q_post])],
-                              'couplings': [muhat]})
+                              'couplings': [muhat],
+                              'entryexit': []})
 
 
 torch.set_printoptions(sci_mode=False, edgeitems=4, precision=2)
@@ -223,12 +265,12 @@ torch.set_printoptions(sci_mode=False, edgeitems=4, precision=2)
 # Combine datasets into a DatasetDict
 # they are really all just functions of muhat with the J_m, J_f projections
 dataset_dict = DatasetDict({
-    'K': data_old(reduce_to_kids, reduce_trans_to_kids, 2),
-    'Mold': data_old(reduce_to_marriage_old, reduce_trans_to_marriage_old, 3),
-    'KMold': data_old(reduce_to_kids_marriage, reduce_trans_to_kids_marriage, 6),
-    'M': data(reduce_to_marriage, reduce_trans_to_marriage, 2),
-    'MS': data(reduce_to_marriage_spec, reduce_trans_to_marriage_spec, 4),
-    'KMS': data(reduce_to_kids_marriage_spec, reduce_trans_to_kids_marriage_spec, 8),
+    #'K': data_old(reduce_to_kids, reduce_trans_to_kids, 2),
+    #'Mold': data_old(reduce_to_marriage_old, reduce_trans_to_marriage_old, 3),
+    #'KMold': data_old(reduce_to_kids_marriage, reduce_trans_to_kids_marriage, 6),
+    'M': data(reduce_to_marriage, reduce_trans_to_marriage, reduce_ee_to_marriage, 2),
+    'MS': data(reduce_to_marriage_spec, reduce_trans_to_marriage_spec, reduce_ee_to_marriage_spec, 4),
+    'KMS': data(reduce_to_kids_marriage_spec, reduce_trans_to_kids_marriage_spec, reduce_ee_to_kids_marriage_spec, 8),
 })
 
 
@@ -256,4 +298,5 @@ class TensorModule(torch.nn.Module):
 #    module = TensorModule(tensor)
 #    script_module = torch.jit.script(module)
 #    torch.jit.save(script_module, filename)
+
 

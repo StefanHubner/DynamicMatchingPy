@@ -32,7 +32,8 @@ def load_data(name, dev):
     tPs = torch.tensor(data["p"][0], device = dev)
     tQs = torch.tensor(data["q"][0], device = dev)
     tMuHat = torch.tensor(data["couplings"][0], device = dev)
-    return tPs, tQs, tMuHat
+    ee = torch.tensor(data["entryexit"][0], device = dev)
+    return tPs, tQs, tMuHat, ee
 
 def load_mus(xi, theta, tPs, tQs, muh, ng, dev, tau,
              masks, tis, years, cf, train0):
@@ -61,22 +62,26 @@ def main(train = False, noload = False, lbfgs = False,
     # (name, state dim, net class, masks, basis, par dim, ys, train0, name)
     current = args.spec
 
-    spec  = { "Mtrend":
-                ("M", 2, SinkhornGeneric, masksM, tauMtrend, 5,
+    spec  = { "Mtrendclosed":
+                ("M", 2, masksM, tauMtrend, 5,
                  range(1999, 2021), False),
               "MS":
-                ("MS", 4, SinkhornMS, masksMS, tauMS, 8,
+                ("MS", 4, masksMS, tauMS, 8,
                  range(1999, 2021), False),
-              "MStrend":
-                ("MS", 4, SinkhornMS, masksMS, tauMStrend, 9,
+              "MSclosed":
+                ("MS", 4, masksMS, tauMStrend, 9,
                  range(1999, 2021), False),
               "KMS":
-                ("KMS", 8, SinkhornGeneric, masksKMS, tauKMS, 12,
+                ("KMS", 8, masksKMS, tauKMS, 12,
+                 range(1999, 2021), False),
+              "KMSclosed":
+                ("KMS", 8, masksKMS, tauKMS, 12,
                  range(1999, 2021), False)
              }[current]
-    vars, ndim, NN, (maskc, mask0), tau, thetadim, years, train0 = spec
+    vars, ndim, (maskc, mask0), tau, thetadim, years, train0 = spec
     outdim = thetadim + 2 * ndim + 1
-    tPs, tQs, tMuHat = load_data(vars, dev)
+    tPs, tQs, tMuHat, ee = load_data(vars, dev)
+    netflow = 1 - (ee * torch.tensor([1,-1]).unsqueeze(0)).sum(1)
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
 
@@ -96,7 +101,7 @@ def main(train = False, noload = False, lbfgs = False,
         theta = torch.tensor(thetadim * [0.1], dtype=torch.float32,
                              device=dev, requires_grad = True)
 
-    network = NN(tau, ndim, outdim, thetadim)
+    network = SinkhornGeneric(tau, ndim, outdim, thetadim)
     if load:
         network.load_state_dict(xi_sd)
     xi = network.to(dev)
@@ -120,8 +125,8 @@ def main(train = False, noload = False, lbfgs = False,
     if train:
 
         closure, add_outputs = create_closure(xi, theta,
-                                              tPs, tQs, tMuHat, ng,
-                                              dev, tau, masks,
+                                              tPs, tQs, tMuHat, netflow,
+                                              ng, dev, tau, masks,
                                               treat_idcs, years, optim,
                                               CF.None_, train0, not neldermead)
         torch.set_printoptions(precision = 5, sci_mode=False)
