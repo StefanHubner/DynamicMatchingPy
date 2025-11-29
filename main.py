@@ -15,7 +15,7 @@ from torchviz import make_dot
 from dynamicmatching.bellman import match_moments, create_closure
 from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url
-from dynamicmatching.bellman import minimise_inner, choices
+from dynamicmatching.bellman import minimise_inner, choices, overallPQ
 from dynamicmatching.deeplearning import SinkhornGeneric, SinkhornMS, masked_log
 from dynamicmatching.neldermead import NelderMeadOptimizer
 
@@ -35,10 +35,10 @@ def load_data(name, dev):
     ee = torch.tensor(data["entryexit"][0], device = dev)
     return tPs, tQs, tMuHat, ee
 
-def load_mus(xi, theta, tPs, tQs, muh, ng, dev, tau,
+def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
              masks, tis, years, cf, train0):
     _, muh1, mus, _ = match_moments(xi, theta,
-                                    tPs, tQs, muh, ng,
+                                    tPs, tQs, muh, netflow, ng,
                                     dev, tau, masks, tis, years,
                                     skiptrain = True, cf = cf,
                                     train0 = train0)
@@ -81,7 +81,7 @@ def main(train = False, noload = False, lbfgs = False,
     vars, ndim, (maskc, mask0), tau, thetadim, years, train0 = spec
     outdim = thetadim + 2 * ndim + 1
     tPs, tQs, tMuHat, ee = load_data(vars, dev)
-    netflow = 1 - (ee * torch.tensor([1,-1], device = dev).unsqueeze(0)).sum(1)
+    netflow = (ee * torch.tensor([1,-1], device = dev).unsqueeze(0)).sum(1)
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
 
@@ -181,9 +181,14 @@ def main(train = False, noload = False, lbfgs = False,
                                               "Matched Processes",
                                               "Raw",
                                               "Network"])
-        _, mu_star = load_mus(xi, theta, tPs, tQs, mu_hat, ng,
+        _, mu_star = load_mus(xi, theta, tPs, tQs, mu_hat, netflow, ng,
                               "cpu", tau, masks, treat_idcs, years,
                               cf = CF.None_, train0 = train0)
+
+        pre = range(0, treat_idcs[0])
+        post = range(treat_idcs[-1] + 1, len(tMuHat))
+        tP, tQ = overallPQ(tQs, tQs, int(train0)*len(pre), 
+                           len(treat_idcs), len(post))
 
         s = st.session_state
         if 'currentyear' not in s: s.currentyear = years[0]
@@ -267,9 +272,9 @@ def main(train = False, noload = False, lbfgs = False,
 
         torch0 = torch.tensor(0.0, device="cpu").view(1,1)
         mus0, v0 = xi(ss(0))
-        ssnext0 = choices(mus0, s.t, torch0, tPs[2], tQs[2], dt, "cpu")
+        ssnext0 = choices(mus0, s.t, torch0, tPs[2], tQs[2], netflow, dt, "cpu")
         mus1, v1 = xi(ss(1))
-        ssnext1 = choices(mus0, s.t, torch0 + 1, tPs[1], tQs[1], dt, "cpu")
+        ssnext1 = choices(mus0, s.t, torch0 + 1, tPs[1], tQs[1], netflow, dt, "cpu")
         with sandbox:
             ps = theta.detach().numpy()
             st.write("Parameters: " +
@@ -333,15 +338,17 @@ def main(train = False, noload = False, lbfgs = False,
                         pcc = 2 * couples[-1,-1].sum()
                         pf, pm = mu[i,-1,:].sum(), mu[i,:,-1].sum()
                         st.subheader("{}".format(years[i]))
-                        st.write(("$\\underbrace{{{:.3f}}}_{{P(C_{{\\neg m}})}} + " +
-                                  " \\underbrace{{{:.3f}}}_{{P(C_m)}} + " +
-                                  " \\underbrace{{{:.3f}}}_{{P(M_0)}} + " +
-                                  " \\underbrace{{{:.3f}}}_{{P(F_0)}} = " +
-                                  " {{{:.3f}}} $").format(
-                                        pcnc, pcc, pm, pf,
-                                        pcnc + pcc + pm + pf))
+                        #st.write(("$\\underbrace{{{:.3f}}}_{{P(C_{{\\neg m}})}} + " +
+                        #          " \\underbrace{{{:.3f}}}_{{P(C_m)}} + " +
+                        #          " \\underbrace{{{:.3f}}}_{{P(M_0)}} + " +
+                        #          " \\underbrace{{{:.3f}}}_{{P(F_0)}} = " +
+                        #          " {{{:.3f}}} $").format(
+                        #                pcnc, pcc, pm, pf,
+                        #                pcnc + pcc + pm + pf))
                         df = pd.DataFrame(mu[i].detach().numpy(),
                                           columns = hdmu, index = hdmu)
+                        #mu[i,:-1,:] * tP[0,:,:].T # mass going to uy
+                        #mu[i,:,:-1] * tQ[:,:,0] # mass going to uy
                         st.dataframe(df)
                         df = pd.DataFrame({
                             'M': mu[i,:-1,:].sum(axis=1).detach().numpy(),

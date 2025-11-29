@@ -63,7 +63,8 @@ def choices(mus, t, d, p, q, netflow, dt, dev):
     F = torch.einsum('nij,ijk->nk', tMuF, q)
     Sincumb = torch.cat([M, F], dim=1)
     nf2 = torch.cat([netflow, netflow]).unsqueeze(dim=0)
-    S = Sincumb * nf2 / (nf2 * Sincumb).sum()
+    S0 = Sincumb + nf2 # as an absolute flow
+    S = S0 / S0.sum()
     return torch.cat([S, t + dt, d], dim = 1)
 
 def check_mass(mus, s):
@@ -73,7 +74,7 @@ def check_mass(mus, s):
     total = torch.sqrt(0.5 * f_resid + 0.5 * m_resid).detach()
     offdiag = (mus.mean(0)[0,1] + mus.mean(0)[1,0]).detach()
     print(f"{TermColours.YELLOW} {total:.2f} {TermColours.RESET}", end='')
-    print(f"{TermColours.CYAN} {offdiag:.2f} {TermColours.RESET}", end='')
+    #print(f"{TermColours.CYAN} {offdiag:.2f} {TermColours.RESET}", end='')
 
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, tP, tQ, netflow,
@@ -165,6 +166,11 @@ def minimise_inner(xi, theta, beta, tP, tQ, netflow,
                   end='\t', flush = "True")
     return loss
 
+def overallPQ(tPs, tQs, n0, n1, n2):
+    tP = (n0 * tPs[0] + n1 * tPs[1] + n2 * tPs[2] ) / (n0 + n1 + n2)
+    tQ = (n0 * tQs[0] + n1 * tQs[1] + n2 * tQs[2] ) / (n0 + n1 + n2)
+    return tP, tQ
+
 def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
                   ng, dev, tau, masks, treat_idcs, years,
                   skiptrain = False, cf = CF.None_, train0 = True):
@@ -187,9 +193,8 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     # dl/dxi = 0 by the envelope theorem at xi = xi_opt
     # update: now gradient graph is kept and phi is set to requires_grad
 
-    n0, n1, n2 = int(train0) * len(pre), len(treat_idcs), len(post)
-    tP = (n0 * tPs[0] + n1 * tPs[1] + n2 * tPs[2] ) / (n0 + n1 + n2)
-    tQ = (n0 * tQs[0] + n1 * tQs[1] + n2 * tQs[2] ) / (n0 + n1 + n2)
+    tP, tQ = overallPQ(tPs, tQs, int(train0)*len(pre),
+                       len(treat_idcs), len(post))
 
     if not skiptrain:
         xi.train()
