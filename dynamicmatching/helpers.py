@@ -83,14 +83,14 @@ def tauMtrend(par, t, d, dev):
 
 def tauMS(par, t, d, dev):
     b_const = torch.stack((
-        mbasis(4, 0, 0, dev),
-        mbasis(4, 1, 1, dev),
-        mbasis(4, 1, 0, dev),
-        mbasis(4, 2, 2, dev),
-        mbasis(4, 3, 3, dev),
-        mbasis(4, 3, 2, dev),
-        d * mbasis(4, 2, 2, dev),
-        d * mbasis(4, 3, 2, dev)))
+        mbasis(3, 0, 0, dev),
+        mbasis(3, 1, 1, dev),
+        mbasis(3, 2, 2, dev),
+        mbasis(3, 2, 1, dev),
+        d * mbasis(3, 0, 0, dev),
+        d * mbasis(3, 1, 1, dev),
+        d * mbasis(3, 2, 2, dev),
+        d * mbasis(3, 2, 1, dev)))
     p_const = par[[0, 1, 2, 3, 4, 5, 6, 7]].view(-1, 1, 1)
     const = torch.multiply(b_const, p_const).sum(dim = 0)
     return extend(const)
@@ -163,12 +163,11 @@ masks0M = [True, True, False]
 masksM  = (maskcM, masks0M)
 
 
-maskcMS = [[True,  False, False, False, True],
-           [True,  True , False, False, True],
-           [False, False, True,  False, True],
-           [False, False, True,  True,  True],
-           [True,  True,  True,  True,  False]]
-masks0MS = [True, True, True, True, False]
+maskcMS = [[True,  False, False, True],
+           [False, True,  True,  True],
+           [False, True,  True,  True],
+           [True,  True,  True,  False]]
+masks0MS = [True, True, True, False]
 masksMS = (maskcMS, masks0MS)
 
 maskcKMS = \

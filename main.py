@@ -58,7 +58,7 @@ def main(train = False, noload = False, lbfgs = False,
     torch.autograd.set_detect_anomaly(True)
 
     # Define specification and load appropriate dataset
-    # outdim = par dim + # of single types + value fct
+    # outdim = par dim + # of single types + value vct
     # (name, state dim, net class, masks, basis, par dim, ys, train0, name)
     current = args.spec
 
@@ -66,10 +66,10 @@ def main(train = False, noload = False, lbfgs = False,
                 ("M", 2, masksM, tauMtrend, 5,
                  range(1999, 2021), False),
               "MS":
-                ("MS", 4, masksMS, tauMS, 8,
+                ("MS", 3, masksMS, tauMS, 9,
                  range(1999, 2021), False),
               "MSclosed":
-                ("MS", 4, masksMS, tauMStrend, 9,
+                ("MS", 4, masksMS, tauMStrend, 8,
                  range(1999, 2021), False),
               "KMS":
                 ("KMS", 8, masksKMS, tauKMS, 12,
@@ -91,7 +91,7 @@ def main(train = False, noload = False, lbfgs = False,
         f = lambda n: hf_hub_download(
             repo_id = repo,
             filename = n + current + ".pt",
-            cache_dir = ".hfcache"
+            cache_dir = ".hvcache"
         )
         theta = torch.load(f("theta"),
                             weights_only = False, map_location=torch.device(dev))
@@ -201,20 +201,20 @@ def main(train = False, noload = False, lbfgs = False,
                                   key='currentyear', on_change=update_year)
 
         if 'mu' not in s: s.mu = 0.25
-        if 'fu' not in s: s.fu = 0.25
+        if 'vu' not in s: s.vu = 0.25
 
         def update_c():
             s.mc = 0.5 - s.mu
-            s.fc = 0.5 - s.fu
+            s.vc = 0.5 - s.vu
 
         mu = st.sidebar.slider('$M_{u}$', 0.0, 0.5, step=0.01,
                                key='mu', on_change=update_c)
-        fu = st.sidebar.slider('$F_{u}$', 0.0, 0.5, step=0.01,
-                               key='fu', on_change=update_c)
+        vu = st.sidebar.slider('$F_{u}$', 0.0, 0.5, step=0.01,
+                               key='vu', on_change=update_c)
         update_c()
 
         if vars == "M":
-            ss = lambda d: torch.tensor([[s.mu, s.mc, s.fu, s.fc, s.t, d]],
+            ss = lambda d: torch.tensor([[s.mu, s.mc, s.vu, s.vc, s.t, d]],
                                         device="cpu")
             hdmu = ['u', 'c', '0']
             hds = ['M_u', 'M_c', 'F_u', 'F_c', 't', 'd']
@@ -227,15 +227,15 @@ def main(train = False, noload = False, lbfgs = False,
         if vars == "MS":
             if 'myu' not in s: s.myu = 0.5
             if 'mhc' not in s: s.mhc = 0.5
-            if 'fyu' not in s: s.fyu = 0.5
-            if 'fhc' not in s: s.fhc = 0.5
+            if 'vyu' not in s: s.vyu = 0.5
+            if 'vhc' not in s: s.vhc = 0.5
 
             def update_ou():
                 s.mou = 1 - s.myu
-                s.fou = 1 - s.fyu
+                s.fou = 1 - s.vyu
             def update_wc():
                 s.mwc = 1 - s.mhc
-                s.fwc = 1 - s.fhc
+                s.fwc = 1 - s.vhc
 
             st.sidebar.slider('$M_{y|u}$', 0.0, 1.0, step=0.01,
                               key='myu', on_change=update_ou)
@@ -246,29 +246,63 @@ def main(train = False, noload = False, lbfgs = False,
 
             update_c()
             st.sidebar.slider('$F_{y|u}$', 0.0, 1.0, step=0.01,
-                              key='fyu', on_change=update_ou)
+                              key='vyu', on_change=update_ou)
             update_ou()
             st.sidebar.slider('$F_{h|c}$', 0.0, 1.0, step=0.01,
-                              key='fhc', on_change=update_wc)
+                              key='vhc', on_change=update_wc)
             update_wc()
 
             ss = lambda d: torch.tensor([[
                                s.mu * s.myu, s.mu * (1 - s.myu),
                                s.mc * s.mhc, s.mc * (1 - s.mhc),
-                               s.fu * s.fyu, s.fu * (1 - s.fyu),
-                               s.fc * s.fhc, s.fc * (1 - s.fhc),
+                               s.vu * s.vyu, s.vu * (1 - s.vyu),
+                               s.vc * s.vhc, s.vc * (1 - s.vhc),
                                s.t, d]], device="cpu")
 
             hdmu = ['uy', 'uo', 'ch', 'cw', '0']
             hds = ['M_{uy}', 'M_{uo}', 'M_{ch}', 'M_{cw}',
                    'F_{uy}', 'F_{uu}', 'F_{ch}', 'F_{cw}', 't', 'd']
 
-            cells = {"uyuy": (0,0), "uouo": (1,1), "chch": (2,2), "cwcw": (3,3),
+            cells = {"uyuy": (0,0), "uouo": (1,1),
+                     "chch": (2,2), "cwcw": (3,3),
                      "uouy": (1,0), "cwch": (3,2),
-                     "uy0": (0,4), "0uy": (4,0), "uo0": (1,4), "0uo": (4,1),
-                     "ch0": (2,4), "0ch": (4,2), "cw0": (3,4), "0cw": (4,3)}
+                     "uy0": (0,4), "0uy": (4,0),
+                     "uo0": (1,4), "0uo": (4,1),
+                     "ch0": (2,4), "0ch": (4,2),
+                     "cw0": (3,4), "0cw": (4,3)}
+
             couples = ["uyuy", "uouo", "uouy", "chch", "cwcw", "cwch"]
             singles = ["uy0", "0uy", "uo0", "0uo", "ch0", "0ch", "cw0", "0cw"]
+
+        if vars == "KMS":
+            hdmu = ['vuy', 'vuo', 'vcy', 'vco',
+                    'kuh', 'kuw', 'kch', 'kcw', '0']
+            hds = ['M_{vuy}', 'M_{vuo}', 'M_{vcy}', 'M_{vco}',
+                   'M_{kuh}', 'M_{kuw}', 'M_{kch}', 'M_{kcw}',
+                   'F_{vuy}', 'F_{vuo}', 'F_{vcy}', 'F_{vco}',
+                   'F_{kuh}', 'F_{kuw}', 'F_{kch}', 'F_{kcw}',
+                   't', 'd']
+
+            cells = {"vuyvuy": (0,0), "vuovuo": (1,1),
+                     "vchvch": (2,2), "vcwvcw": (3,3),
+                     "kuykuy": (4,4), "kuokuo": (5,5),
+                     "kuokuy": (5,4), "kchkch": (6,6),
+                     "kcwkcw": (7,7), "kcwkch": (7,6),
+                     "vuy0": (0,8), "0vuy": (8,0),
+                     "vuo0": (1,8), "0vuo": (8,1),
+                     "vch0": (2,8), "0vch": (8,2),
+                     "vcw0": (3,8), "0vcw": (8,3),
+                     "kuy0": (4,8), "0kuy": (8,4),
+                     "kuo0": (5,8), "0kuo": (8,5),
+                     "kch0": (6,8), "0kch": (8,6),
+                     "kcw0": (7,8), "0kcw": (8,7)}
+
+            couples = ["vuyvuy", "vuvouo", "vchvch", "vcwvcw", "vcwvch",
+                       "kuykuy", "kukouo", "kchkch", "kcwkcw", "kcwkch"]
+            singles = ["vuy0", "0vuy", "vuo0", "0vuo",
+                       "vch0", "0vch", "vcw0", "0vcw",
+                       "kuy0", "0kuy", "kuo0", "0kuo",
+                       "kch0", "0kch", "kcw0", "0kcw"]
 
         torch0 = torch.tensor(0.0, device="cpu").view(1,1)
         mus0, v0 = xi(ss(0))

@@ -73,10 +73,11 @@ def trans(sex: str, i: int) -> pd.DataFrame:
     df.index.names = index_names
     return df
 
-t = trans("men", 1)
-t.index
-t.columns
-t
+p = trans("men", 1)
+q = trans("women", 1)
+p.index
+p.columns
+p
 
 def entryexit() -> pd.DataFrame:
     n = 'demographics'
@@ -238,7 +239,7 @@ def data(red, tsred, eered, ntypes):
     matchhat = torch.tensor(block.values, dtype=torch.float32).reshape(22, 33, 33)
     redmhat = torch.stack([torch.tensor(red(m)) for m in matchhat])
     muhat, nhat = normalise_tensor(redmhat)
-    eehat = torch.tensor(eered(ee.values)) / nhat.mean()
+    eehat = torch.tensor(eered(ee.values)).to(dtype=torch.float32) / nhat.mean()
     ng = nhat[1:] / nhat[:-1] - 1
     p_pre, q_pre   = tt_tensor(1, ntypes, tsred)
     p, q           = tt_tensor(2, ntypes, tsred)
@@ -264,29 +265,6 @@ def data_old(red, tsred, ntypes):
 
 torch.set_printoptions(sci_mode=False, edgeitems=4, precision=2)
 
-# Combine datasets into a DatasetDict
-# they are really all just functions of muhat with the J_m, J_f projections
-dataset_dict = DatasetDict({
-    #'K': data_old(reduce_to_kids, reduce_trans_to_kids, 2),
-    #'Mold': data_old(reduce_to_marriage_old, reduce_trans_to_marriage_old, 3),
-    #'KMold': data_old(reduce_to_kids_marriage, reduce_trans_to_kids_marriage, 6),
-    'M': data(reduce_to_marriage, reduce_trans_to_marriage, reduce_ee_to_marriage, 2),
-    'KM': data(reduce_to_kids_marriage, reduce_trans_to_kids_marriage, reduce_ee_to_kids_marriage, 4),
-    'MS': data(reduce_to_marriage_spec, reduce_trans_to_marriage_spec, reduce_ee_to_marriage_spec, 4),
-    'KMS': data(reduce_to_kids_marriage_spec, reduce_trans_to_kids_marriage_spec, reduce_ee_to_kids_marriage_spec, 8),
-})
-
-
-from dotenv import load_dotenv
-from huggingface_hub import login
-import os
-
-load_dotenv()
-hf_rwtoken = os.getenv('HF_TOKEN')
-from huggingface_hub import login
-login(token=hf_rwtoken)
-dataset_dict.push_to_hub("StefanHubner/DivorceData", token = hf_rwtoken)
-
 class TensorModule(torch.nn.Module):
     def __init__(self, tensor):
         super().__init__()
@@ -301,5 +279,167 @@ class TensorModule(torch.nn.Module):
 #    module = TensorModule(tensor)
 #    script_module = torch.jit.script(module)
 #    torch.jit.save(script_module, filename)
+
+
+sri = c.index.get_level_values('imigration') == 'single'
+sci = c.columns.get_level_values('code') == '30000'
+
+scpl = c.iloc[~sri, ~sci]
+srow = c.iloc[sri,~sci].reset_index(level=[1,2,3,4,5], drop=True)
+scol = c.iloc[:, sci].T.reset_index(level=[0,2,3,4,5], drop=True).T
+
+agg = (
+       scpl
+       .groupby(level=['year', 'children', 'marital_st', 'whyo'], axis=0).sum()
+       .groupby(level=['children', 'marital_st', 'whyo'], axis=1).sum()
+      )
+
+agg_srow = srow.groupby(level=['children', 'marital_st', 'whyo'], axis=1).sum()
+agg_scol = scol.groupby(level=['year', 'children', 'marital_st', 'whyo'], axis=0).sum()
+
+eeagg = ee.groupby(level=['children', 'marital_st', 'whyo'], axis=0).sum()
+
+def map_state(children: str, marital: str, whyo: str) -> str:
+    if marital == "current":
+        if children == "yes":
+            if whyo == "home":
+                return "curhome"
+            elif whyo == "work":
+                return "curwork"
+        elif children == "no":
+            return "curwork"
+    elif marital == "unmarried":
+        return "unmarried"
+
+def remap_col(col, years: bool = False, trans: bool = False):
+    if years:
+        year, children, marital, whyo = col
+    elif trans:
+        child_p, mar_p, whyo_p, children, marital, whyo = col
+        state_p = map_state(child_p, mar_p, whyo_p)
+        year = None
+    else:
+        children, marital, whyo = col
+        year = None
+    state = map_state(children, marital, whyo)
+    return (year, state) if years else ((state,) if not trans else (state_p, state))
+
+def new_cols(cols, years: bool = False, trans: bool = False) -> pd.MultiIndex:
+    names = ["year", "state"] if years else (["state"] if not trans else ["state_p", "state"])
+    return pd.MultiIndex.from_tuples(
+        [remap_col(c, years=years, trans=trans) for c in cols],
+        names=names,
+    )
+
+state_order = ["unmarried", "curhome", "curwork"]
+
+eeagg2 = eeagg.T.copy()
+eeagg2.columns = new_cols(eeagg2.columns, years=False)
+eeagg3 = eeagg2.groupby(axis=1, level="state").sum()
+eeagg3 = eeagg3.loc[:, [s for s in state_order if s in eeagg3.columns]].T
+
+agg2 = agg.copy()
+agg2.columns = new_cols(agg.columns, years=False)
+agg3 = agg2.groupby(axis=1, level="state").sum()
+agg3 = agg3.loc[:, [s for s in state_order if s in agg3.columns]]
+
+A = agg3.T.copy()
+A.columns = new_cols(A.columns, years=True)
+A = A.groupby(axis=1, level=["year", "state"]).sum()
+years = A.columns.get_level_values("year").unique()
+ncs = [(y, s) for y in years for s in state_order if (y, s) in A.columns]
+A = A.loc[:, ncs].T
+
+agg_srow2 = agg_srow.copy()
+agg_srow2.columns = new_cols(agg_srow2.columns, years = False)
+agg_srow3 = agg_srow2.groupby(axis=1, level="state").sum()
+agg_srow3 = agg_srow3.loc[:, [s for s in state_order if s in agg_srow3.columns]]
+
+agg_scol2 = agg_scol.T.copy()
+agg_scol2.columns = new_cols(agg_scol2.columns, years = True)
+agg_scol3 = agg_scol2.groupby(axis=1, level=["year", "state"]).sum()
+ncs = [(y, s) for y in years for s in state_order if (y, s) in agg_scol3.columns]
+agg_scol3 = agg_scol3.loc[:, ncs].T
+
+all = []
+ns = []
+for y in years:
+    couples = A.loc[y].values
+    singlef = agg_srow3.loc[y].values
+    singlem = agg_scol3.loc[y].values
+    ns.append(singlem.sum() + singlef.sum() + 2 * couples.sum())
+    couples_m = np.concat([couples, singlem], axis = 1)
+    single_f_ext = np.concat([singlef, np.array([0])], axis = 0).reshape(1, -1)
+    couples_mf = np.concat([couples_m, single_f_ext], axis = 0)
+    all.append(couples_mf)
+
+final = torch.tensor(all)
+
+# think about nhat. is it really 2*couples + singlef + singlem. yes, for margins!!
+muhat = final/torch.tensor(ns).unsqueeze(-1).unsqueeze(-1)
+muhat.sum(dim=2)[:,0:3]
+muhat.sum(dim=1)[:,0:3]
+
+# transitions
+
+def bodge_trans(p):
+    spi = p.index.get_level_values('COMB') // 1000000000 == 3
+    p0 = p.iloc[spi, :]
+    pcpl = p.iloc[~spi, :]
+    # cannot be done in one go, otherwise singles will be aggregated with native/imm
+    pagg = pcpl.groupby(level=['child_p', 'mar_p', 'whyo_p', 'child', 'mar', 'whyo'], axis=0).sum()
+    agg_s = p0.groupby(level=['child_p', 'mar_p', 'whyo_p', 'child', 'mar', 'whyo'], axis=0).sum()
+    def reassign(pagg1):
+        pagg2 = pagg1.T.reset_index(level = [0], drop=True).T.copy()
+        pagg2.columns = new_cols(pagg2.columns, years=False)
+        pagg3 = pagg2.groupby(axis=1, level="state").sum()
+        pagg3 = pagg3.loc[:, [s for s in state_order if s in agg3.columns]]
+        pA = pagg3.T.copy()
+        pA.columns = new_cols(pA.columns, years=False, trans = True)
+        pA = pA.groupby(axis=1, level=["state_p", "state"]).sum()
+        ncs = [(sp, s) for sp in state_order for s in state_order 
+               if (sp, s) in pA.columns]
+        pA = pA.loc[:, ncs].T
+        return pA
+    nP0 = np.concat([reassign(pagg).values, reassign(agg_s).values], axis = 0)
+    tP0 = torch.tensor(nP0).view(4, 3, 3)
+    return (tP0 / tP0.sum(dim=2, keepdim=True)).nan_to_num(0.0).to(dtype=torch.float32)
+
+p_pre  = bodge_trans(trans("men", 1)).transpose(0,1).numpy()
+p      = bodge_trans(trans("men", 2)).transpose(0,1).numpy()
+p_post = bodge_trans(trans("men", 3)).transpose(0,1).numpy()
+q_pre  = bodge_trans(trans("women", 1)).numpy()
+q      = bodge_trans(trans("women", 2)).numpy()
+q_post = bodge_trans(trans("women", 3)).numpy()
+
+eehat = (torch.tensor(eeagg3.values) / torch.tensor(ns).mean()).to(dtype=torch.float32).numpy()
+
+MSnew = Dataset.from_dict({'p': [np.stack([p_pre, p, p_post])],
+                           'q': [np.stack([q_pre, q, q_post])],
+                           'couplings': [muhat.to(dtype=torch.float32).numpy()],
+                           'entryexit': [eehat]})
+
+# Combine datasets into a DatasetDict
+# they are really all just functions of muhat with the J_m, J_f projections
+dataset_dict = DatasetDict({
+    #'K': data_old(reduce_to_kids, reduce_trans_to_kids, 2),
+    #'Mold': data_old(reduce_to_marriage_old, reduce_trans_to_marriage_old, 3),
+    #'KMold': data_old(reduce_to_kids_marriage, reduce_trans_to_kids_marriage, 6),
+    'M': data(reduce_to_marriage, reduce_trans_to_marriage, reduce_ee_to_marriage, 2),
+    'KM': data(reduce_to_kids_marriage, reduce_trans_to_kids_marriage, reduce_ee_to_kids_marriage, 4),
+    'MS': MSnew,
+    'KMS': data(reduce_to_kids_marriage_spec, reduce_trans_to_kids_marriage_spec, reduce_ee_to_kids_marriage_spec, 8),
+})
+
+
+from dotenv import load_dotenv
+from huggingface_hub import login
+import os
+
+load_dotenv()
+hf_rwtoken = os.getenv('HF_TOKEN')
+from huggingface_hub import login
+login(token=hf_rwtoken)
+dataset_dict.push_to_hub("StefanHubner/DivorceData", token = hf_rwtoken)
 
 
