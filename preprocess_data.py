@@ -181,14 +181,16 @@ reduce_trans_to_kids_marriage = lambda ts: reduce_trans_to_old(ts, [0, 1], 6)
 reduce_to = lambda d1, so, ntypes: reduce_to_ho([2] * 5, d1, so, ntypes)
 reduce_trans_to = lambda d1, so, ntypes: reduce_trans_to_ho([2] * 5, d1, so, ntypes)
 reduce_ee_to = lambda d1, so, ntypes: reduce_ee_to_ho([2] * 5, d1, so, ntypes)
+
 reduce_to_marriage = lambda d1: reduce_to(d1, [0, 1, 2, 4], 2)
 reduce_trans_to_marriage = lambda d1: reduce_trans_to(d1, [0, 1, 2, 4], 2)
 reduce_ee_to_marriage = lambda d1: reduce_ee_to(d1, [0, 1, 2, 4], 2)
 reduce_to_marriage_spec = lambda d1: reduce_to(d1, [0, 1, 2], 4)
 reduce_trans_to_marriage_spec = lambda d1: reduce_trans_to(d1, [0, 1, 2], 4)
 reduce_ee_to_marriage_spec = lambda d1: reduce_ee_to(d1, [0, 1, 2], 4)
-reduce_to_kids_marriage= lambda d1: reduce_to(d1, [0, 1, 4], 4)
+reduce_to_kids_marriage = lambda d1: reduce_to(d1, [0, 1, 4], 4)
 reduce_trans_to_kids_marriage= lambda d1: reduce_trans_to(d1, [0, 1, 4], 4)
+reduce_ee_to_kids_marriage= lambda d1: reduce_ee_to(d1, [0, 1, 4], 4)
 reduce_to_kids_marriage_spec = lambda d1: reduce_to(d1, [0, 1], 8)
 reduce_trans_to_kids_marriage_spec = lambda d1: reduce_trans_to(d1, [0, 1], 8)
 reduce_ee_to_kids_marriage_spec = lambda d1: reduce_ee_to(d1, [0, 1], 8)
@@ -269,6 +271,7 @@ dataset_dict = DatasetDict({
     #'Mold': data_old(reduce_to_marriage_old, reduce_trans_to_marriage_old, 3),
     #'KMold': data_old(reduce_to_kids_marriage, reduce_trans_to_kids_marriage, 6),
     'M': data(reduce_to_marriage, reduce_trans_to_marriage, reduce_ee_to_marriage, 2),
+    'KM': data(reduce_to_kids_marriage, reduce_trans_to_kids_marriage, reduce_ee_to_kids_marriage, 4),
     'MS': data(reduce_to_marriage_spec, reduce_trans_to_marriage_spec, reduce_ee_to_marriage_spec, 4),
     'KMS': data(reduce_to_kids_marriage_spec, reduce_trans_to_kids_marriage_spec, reduce_ee_to_kids_marriage_spec, 8),
 })
