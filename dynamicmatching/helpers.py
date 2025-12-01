@@ -164,7 +164,7 @@ masksM  = (maskcM, masks0M)
 
 
 maskcMS = [[True,  False, False, True],
-           [False, True,  True,  True],
+           [False, True,  False, True],
            [False, True,  True,  True],
            [True,  True,  True,  False]]
 masks0MS = [True, True, True, False]
@@ -204,16 +204,4 @@ class ManualLRScheduler:
 # Function to minimize fb
 def minfb(a, b):
     return a + b - torch.sqrt(a**2 + b**2 + 1e-8)
-
-
-class ManualLRScheduler:
-    def __init__(self, optimizer, factor=0.1, min_lr=1e-8):
-        self.optimizer = optimizer
-        self.factor = factor
-        self.min_lr = min_lr
-
-    def step(self):
-        for param_group in self.optimizer.param_groups:
-            new_lr = max(param_group['lr'] * self.factor, self.min_lr)
-            param_group['lr'] = new_lr
 
