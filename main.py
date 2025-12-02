@@ -188,8 +188,9 @@ def main(train = False, noload = False, lbfgs = False,
 
         pre = range(0, treat_idcs[0])
         post = range(treat_idcs[-1] + 1, len(tMuHat))
-        tP, tQ = overallPQ(tQs, tQs, int(train0)*len(pre), 
-                           len(treat_idcs), len(post))
+        transitions = overallPQ(tQs, tQs, int(train0)*len(pre), 
+                                len(treat_idcs), len(post))
+        tP, tQ, tP0, tQ0, tP1, tQ1 = transitions
 
         s = st.session_state
         if 'currentyear' not in s: s.currentyear = years[0]
@@ -307,9 +308,9 @@ def main(train = False, noload = False, lbfgs = False,
 
         torch0 = torch.tensor(0.0, device="cpu").view(1,1)
         mus0, v0 = xi(ss(0))
-        ssnext0 = choices(mus0, s.t, torch0, tPs[2], tQs[2], netflow, dt, "cpu")
+        ssnext0 = choices(mus0, s.t, torch0, tP0, tQ0, tP1, tQ1, netflow, dt, "cpu")
         mus1, v1 = xi(ss(1))
-        ssnext1 = choices(mus0, s.t, torch0 + 1, tPs[1], tQs[1], netflow, dt, "cpu")
+        ssnext1 = choices(mus0, s.t, torch0 + 1, tP0, tQ0, tP1, tQ1, netflow, dt, "cpu")
         with sandbox:
             ps = theta.detach().numpy()
             st.write("Parameters: " +

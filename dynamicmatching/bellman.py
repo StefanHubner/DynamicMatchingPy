@@ -56,11 +56,16 @@ def choices_vectorised(mus, p, q, dev):
          torch.matmul(tMuF.view(-1, q.shape[1]), q.T)],
         dim=1)
 
-def choices(mus, t, d, p, q, netflow, dt, dev):
+def choices(mus, t, d, p0, q0, p1, q1, netflow, dt, dev):
     tMuM = mus[:,:-1,:]
     tMuF = mus[:,:,:-1]
-    M = torch.einsum('nij,ijk->nk', tMuM, p)
-    F = torch.einsum('nij,ijk->nk', tMuF, q)
+    alpha = d.view(n, 1, 1, 1)
+    p = (1.0 - alpha) * p0.unsqueeze(0) + alpha * p1.unsqueeze(0)
+    q = (1.0 - alpha) * q0.unsqueeze(0) + alpha * q1.unsqueeze(0)
+    M = torch.einsum('nij,nijk->nk', tMuM, p)
+    F = torch.einsum('nij,nijk->nk', tMuF, q)
+    #M = torch.einsum('nij,ijk->nk', tMuM, p)
+    #F = torch.einsum('nij,ijk->nk', tMuF, q)
     Sincumb = torch.cat([M, F], dim=1)
     nf2 = torch.cat([netflow, netflow]).unsqueeze(dim=0)
     S0 = Sincumb + nf2 # as an absolute flow
@@ -77,11 +82,12 @@ def check_mass(mus, s):
     #print(f"{TermColours.CYAN} {offdiag:.2f} {TermColours.RESET}", end='')
 
 # Define the residuals function (unconstrained + sinkhorn)
-def residuals(ng0, xi, tP, tQ, netflow,
+def residuals(ng0, xi, transitions, netflow,
               beta, theta, tau, masks, ts, dev):
 
     maskc, mask0 = masks # maskc now has all information
-    ndim = tP.shape[0]
+    _, _, tP0, tQ0, tP1, tQ1 = transitions
+    ndim = tP0.shape[0]
 
     concentrations = torch.tensor([2.0] * ndim).to(device = dev)
     dirichlet = torch.distributions.Dirichlet(concentrations)
@@ -97,8 +103,7 @@ def residuals(ng0, xi, tP, tQ, netflow,
     mus, vcur = xi(st)
     check_mass(mus, s)
     dt = ts[1] - ts[0]
-    # TODO: transition matrix by d or weighted (#of per) comb of them?
-    stnext = choices(mus, rts, rds, tP, tQ, netflow, dt, dev)
+    stnext = choices(mus, rts, rds, tP0, tQ0, tP1, tQ1, netflow, dt, dev)
     _, vnext = xi(stnext)
 
     vmapper = torch.vmap(lambda t, d: tau(theta, t, d, dev), in_dims=(0, 0))
@@ -145,7 +150,7 @@ def residuals(ng0, xi, tP, tQ, netflow,
     return mean_resid_v
 
 
-def minimise_inner(xi, theta, beta, tP, tQ, netflow,
+def minimise_inner(xi, theta, beta, transitions, netflow,
                    ng, ts, tau, masks, dev):
 
     epochs = 300
@@ -153,7 +158,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, netflow,
 
     for epoch in range(0, epochs):
         optimiser.zero_grad()
-        loss = residuals(ng, xi, tP, tQ, netflow,
+        loss = residuals(ng, xi, transitions, netflow,
                          beta, theta, tau, masks, ts, dev)
         loss.backward(retain_graph=True)
         optimiser.step()
@@ -169,7 +174,7 @@ def minimise_inner(xi, theta, beta, tP, tQ, netflow,
 def overallPQ(tPs, tQs, n0, n1, n2):
     tP = (n0 * tPs[0] + n1 * tPs[1] + n2 * tPs[2] ) / (n0 + n1 + n2)
     tQ = (n0 * tQs[0] + n1 * tQs[1] + n2 * tQs[2] ) / (n0 + n1 + n2)
-    return tP, tQ
+    return tP, tQ, tPs[2], tQs[2], tPs[1], tQs[1]
 
 def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
                   ng, dev, tau, masks, treat_idcs, years,
@@ -193,20 +198,21 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     # dl/dxi = 0 by the envelope theorem at xi = xi_opt
     # update: now gradient graph is kept and phi is set to requires_grad
 
-    tP, tQ = overallPQ(tPs, tQs, int(train0)*len(pre),
-                       len(treat_idcs), len(post))
+    transitions = overallPQ(tPs, tQs, int(train0)*len(pre),
+                            len(treat_idcs), len(post))
+    tP, tQ, tP0, tQ0, tP1, tQ1 = transitions
 
     if not skiptrain:
         xi.train()
-        loss = minimise_inner(xi, theta, beta, tP, tQ, netflow,
+        loss = minimise_inner(xi, theta, beta, transitions, netflow,
                               ng, ts, tau, masks, dev)
     else:
         loss = None
 
 
-    def transition_mu(xi, p, q, cf):
+    def transition_mu(xi, p0, q0, p1, q1, cf):
         def step(mus, t, d):
-            sst = choices(mus, t, d, p, q, netflow, ts[1] - ts[0], dev)
+            sst = choices(mus, t, d, p0, q0, p1, q1, netflow, ts[1] - ts[0], dev)
             mus, _ = xi(sst)
             return mus
         def step_household(mus): # not in use
@@ -231,15 +237,8 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     transition = transition_mu
 
     # same transition for all regimes
-    walker_common = transition(xi, tP, tQ, cf)
-
-    # regime spec transition (this is a CF?)
-    walker_pre = transition(xi, tPs[0], tQs[0], cf)
-    walker_treat = transition(xi, tPs[1], tQs[1], cf)
-    walker_post = transition(xi, tPs[2], tQs[2], cf)
-
-    # regimes = ([(pre, walker_pre)] if train0 else []) + [(treat_idcs, walker_treat), (post, walker_post)]
-    regimes = ([(pre, walker_common)] if train0 else []) + [(treat_idcs, walker_common), (post, walker_common)]
+    walker = transition(xi, tP0, tQ0, tP1, tQ1, cf)
+    regimes = ([(pre, walker)] if train0 else []) + [(treat_idcs, walker), (post, walker)]
 
     ss_star = torch.zeros(nT, ss_cur.shape[1]).to(dev)
     mu_star = torch.zeros(nT, nty0, nty0).to(dev)
