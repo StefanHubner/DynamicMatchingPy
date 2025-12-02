@@ -254,8 +254,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     #resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0:,:,:]).sum()
     resid = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[idx0:,:,:], masks)
-
-    print("resid: ", resid.detach().cpu().numpy())
+    print("D_KL: ", resid.detach().cpu().numpy())
 
     torch.cuda.empty_cache()
 
