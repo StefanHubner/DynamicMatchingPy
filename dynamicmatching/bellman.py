@@ -261,6 +261,11 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     return (resid, tMuHat, mu_star, loss)
 
+# earlier frobenius norm matching has a margin-mismatch component, which is controlled by the markov kernel
+# and entry/exit. as a result, being a square criterion it balances this over different cells.
+# now matching is conditional on margins which is invariant wrt the markov kernel errors.
+# KL criterion minimised between phat and pstar.
+# theoretically much cleaner and robust to accumulation of mass over/underestimation due to conditionality
 def conditional_kl_loss(mu_data, mu_model, masks):
     T, ndim1, _ = mu_data.shape
     ndim = ndim1 - 1
