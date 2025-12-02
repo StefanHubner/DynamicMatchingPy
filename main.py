@@ -136,23 +136,24 @@ def main(train = False, noload = False, lbfgs = False,
         history = pd.DataFrame(index=np.arange(1, num_epochs+1),
                                columns=columns)
 
-        losshat = torch.tensor(10e30, device=dev)
+        losshat = 10e30 #torch.tensor(10e30, device=dev)
         hfpath = "./hfdd/"
         for epoch in range(1, num_epochs + 1):
             loss = optim.step(closure)
+            curloss = loss.item()
             mush, muss, l = add_outputs
-            record = [loss.item(), l.item()]
+            record = [curloss, l.item()]
             par = theta.cpu().detach().numpy().flatten()
             print("theta_t: {}".format(par))
-            if loss < losshat:
-                losshat = loss
+            if curloss < losshat:
+                losshat = curloss
                 xihat, thetahat = xi, theta
                 print("Saving tensors")
                 torch.save(thetahat, hfpath + "theta" + current + ".pt")
                 torch.save(xihat.state_dict(),
                            hfpath + "xi" + current + ".pt")
             else:
-                print("previous loss: {} < loss: {}".format(losshat, loss))
+                print("previous loss: {} < loss: {}".format(losshat, curloss))
             record.extend(par)
             history.loc[epoch] = record
             if True: # loss <= losshat:
