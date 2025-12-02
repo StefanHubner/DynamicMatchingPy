@@ -217,8 +217,6 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
                 CF.HouseholdOnly: step_household,
                 CF.MatchingOnly: step_matching}[cf]
 
-
-
     tM = tMuHat[:,:-1,:].sum(2)
     tF = tMuHat[:,:,:-1].sum(1)
     ss_hat = torch.cat((tM, tF), dim=1)
@@ -254,10 +252,35 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
            #ss_star[i, ] = ss_cur
            #ss_cur = walker(ss_cur)
 
-    resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0:,:,:]).sum()
+    #resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0:,:,:]).sum()
+    resid = conditional_kl_loss(tMuHat, mu_star, masks)
 
     print("resid: ", resid.detach().cpu().numpy())
 
     torch.cuda.empty_cache()
 
     return (resid, tMuHat, mu_star, loss)
+
+def conditional_kl_loss(mu_data, mu_model, masks):
+    T, ndim1, _ = mu_data.shape
+    ndim = ndim1 - 1
+
+    def by_gender(mu_d, mu_m, mc):
+        data_rows  = mu_d[:, :ndim, :]
+        model_rows = mu_m[:, :ndim, :]
+
+        S_hat = data_rows.sum(dim=-1, keepdim=True)
+        S_mod = model_rows.sum(dim=-1, keepdim=True)
+
+        p_hat = data_rows / S_hat
+        p_mod = model_rows / S_mod
+
+        row_kl = (p_hat * (masked_log(p_hat, mc[:-1,:]) - masked_log(p_mod, mc[:-1,:]))).sum(dim=-1)
+        return (S_hat.squeeze(-1) * row_kl).sum()
+
+    maskc, _ = masks
+    ckl_m = by_gender(mu_data, mu_model, maskc)
+    ckl_f = by_gender(mu_data.transpose(1,2), mu_model.transpose(1,2), maskc.T)
+
+    return ckl_m + ckl_f
+
