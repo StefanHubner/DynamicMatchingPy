@@ -59,7 +59,7 @@ def choices_vectorised(mus, p, q, dev):
 def choices(mus, t, d, p0, q0, p1, q1, netflow, dt, dev):
     tMuM = mus[:,:-1,:]
     tMuF = mus[:,:,:-1]
-    alpha = d.view(n, 1, 1, 1)
+    alpha = d.view(-1, 1, 1, 1)
     p = (1.0 - alpha) * p0.unsqueeze(0) + alpha * p1.unsqueeze(0)
     q = (1.0 - alpha) * q0.unsqueeze(0) + alpha * q1.unsqueeze(0)
     M = torch.einsum('nij,nijk->nk', tMuM, p)
