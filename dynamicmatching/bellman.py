@@ -148,7 +148,7 @@ def residuals(ng0, xi, tP, tQ, netflow,
 def minimise_inner(xi, theta, beta, tP, tQ, netflow,
                    ng, ts, tau, masks, dev):
 
-    epochs = 1000
+    epochs = 300
     optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):
@@ -253,7 +253,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
            #ss_cur = walker(ss_cur)
 
     #resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0:,:,:]).sum()
-    resid = conditional_kl_loss(tMuHat, mu_star, masks)
+    resid = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[idx0:,:,:], masks)
 
     print("resid: ", resid.detach().cpu().numpy())
 
@@ -280,7 +280,10 @@ def conditional_kl_loss(mu_data, mu_model, masks):
         p_hat = data_rows / S_hat
         p_mod = model_rows / S_mod
 
-        row_kl = (p_hat * (masked_log(p_hat, mc[:-1,:]) - masked_log(p_mod, mc[:-1,:]))).sum(dim=-1)
+        log_phat = masked_log(p_hat, mc[:-1,:])
+        log_pmod = masked_log(p_mod, mc[:-1,:])
+        row_kl = (p_hat * (log_phat - log_pmod)).sum(dim=-1)
+
         return (S_hat.squeeze(-1) * row_kl).sum()
 
     maskc, _ = masks
