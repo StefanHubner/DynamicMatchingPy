@@ -154,7 +154,7 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
                    ng, ts, tau, masks, dev):
 
     epochs = 300
-    optimiser = optim.SGD(xi.parameters(), lr = .1) # , weight_decay = 0.01)
+    optimiser = optim.Adam(xi.parameters())#, lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):
         optimiser.zero_grad()
@@ -180,7 +180,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
                   ng, dev, tau, masks, treat_idcs, years,
                   skiptrain = False, cf = CF.None_, train0 = True):
 
-    beta = torch.tensor(0.9, device=dev)
+    beta = torch.tensor(0.95, device=dev)
     ts0 = torch.tensor(years, device=dev)
     ts = (ts0 - torch.min(ts0)) / (torch.max(ts0) - torch.min(ts0))
     print("theta: ", theta.detach().cpu().numpy())
@@ -252,7 +252,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
            #ss_cur = walker(ss_cur)
 
     #resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0:,:,:]).sum()
-    resid = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[idx0:,:,:], masks)
+    resid = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[idx0:,:,:], masks) + 1.0 * loss.detach()
     print("D_KL: ", resid.detach().cpu().numpy())
 
     torch.cuda.empty_cache()

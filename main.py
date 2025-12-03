@@ -66,7 +66,7 @@ def main(train = False, noload = False, lbfgs = False,
                 ("M", 2, masksM, tauMtrend, 5,
                  range(1999, 2021), False),
               "MS":
-                ("MS", 3, masksMS, tauMS, 9,
+                ("MS", 3, masksMS, tauMS, 8,
                  range(1999, 2021), False),
               "MSclosed":
                 ("MS", 4, masksMS, tauMStrend, 8,
@@ -118,7 +118,7 @@ def main(train = False, noload = False, lbfgs = False,
         optim = torch.optim.Adam([theta], lr = .1)
         num_epochs = 2000
 
-    ng = 2**19 # max 2**19 number of draws (uniform gridpoints)
+    ng = 2**12 # max 2**19 number of draws (uniform gridpoints)
     treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
     xihat, thetahat = xi, theta
 
