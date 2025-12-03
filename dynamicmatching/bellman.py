@@ -27,7 +27,7 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
         additional_outputs[0] = ssh.detach().cpu()
         additional_outputs[1] = sss.detach().cpu()
         additional_outputs[2] = l.detach().cpu()
-        additional_outputs[3] = conds.detach().cpu()
+        additional_outputs[3] = [c.detach().cpu() for c in conds]
         return resid
     return closure, additional_outputs
 

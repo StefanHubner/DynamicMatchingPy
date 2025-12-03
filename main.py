@@ -118,7 +118,7 @@ def main(train = False, noload = False, lbfgs = False,
                                   line_search_fn = 'strong_wolfe')
         num_epochs = 1
     elif neldermead:
-        optim = NelderMeadOptimizer([theta], lr = 1.0)
+        optim = NelderMeadOptimizer([theta], lr = 0.3)
         num_epochs = 1000
     else:
         optim = torch.optim.Adam([theta], lr = .1)

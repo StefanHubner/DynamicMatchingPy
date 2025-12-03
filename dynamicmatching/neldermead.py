@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 class NelderMeadOptimizer:
-    def __init__(self, params, lr=1.0, alpha=1.0, gamma=2.0, rho=0.5, sigma=0.5):
+    def __init__(self, params, lr=0.5, alpha=1.0, gamma=2.0, rho=0.5, sigma=0.5):
         self.param_groups = [{'params': list(params), 'lr': lr}]
         self.alpha = alpha  # reflection
         self.gamma = gamma  # expansion
