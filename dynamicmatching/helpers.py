@@ -91,7 +91,7 @@ def tauMS(par, t, d, dev):
         d * mbasis(3, 0, 0, dev),
         d * mbasis(3, 1, 1, dev),
         d * mbasis(3, 2, 2, dev),
-        d * mbasis(3, 2, 1, dev)))
+        d * mbasis(3, 2, 1, dev),
         d * mbasis(3, 1, 2, dev)))
     p_const = par[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]].view(-1, 1, 1)
     const = torch.multiply(b_const, p_const).sum(dim = 0)
