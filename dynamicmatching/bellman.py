@@ -260,7 +260,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     torch.cuda.empty_cache()
 
-    return (kl_div + 1.0 * loss.detach(), tMuHat, mu_star, loss,
+    return (kl_div + 2.0 * loss.detach(), tMuHat, mu_star, loss,
             (cond_m_hat, cond_m_star, cond_f_hat, cond_f_star))
 
 # earlier frobenius norm matching has a margin-mismatch component, which is controlled by the markov kernel
