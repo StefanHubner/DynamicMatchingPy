@@ -87,11 +87,13 @@ def tauMS(par, t, d, dev):
         mbasis(3, 1, 1, dev),
         mbasis(3, 2, 2, dev),
         mbasis(3, 2, 1, dev),
+        mbasis(3, 1, 2, dev),
         d * mbasis(3, 0, 0, dev),
         d * mbasis(3, 1, 1, dev),
         d * mbasis(3, 2, 2, dev),
         d * mbasis(3, 2, 1, dev)))
-    p_const = par[[0, 1, 2, 3, 4, 5, 6, 7]].view(-1, 1, 1)
+        d * mbasis(3, 1, 2, dev)))
+    p_const = par[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]].view(-1, 1, 1)
     const = torch.multiply(b_const, p_const).sum(dim = 0)
     return extend(const)
 
@@ -164,7 +166,7 @@ masksM  = (maskcM, masks0M)
 
 
 maskcMS = [[True,  False, False, True],
-           [False, True,  False, True],
+           [False, True,  True, True],
            [False, True,  True,  True],
            [True,  True,  True,  False]]
 masks0MS = [True, True, True, False]

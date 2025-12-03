@@ -15,7 +15,7 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
     additional_outputs = [None, None, None]
     def closure():
         optim.zero_grad()
-        resid, ssh, sss, l = match_moments(xi,
+        resid, ssh, sss, l, conds = match_moments(xi,
                                            theta,
                                            tPs, tQs, tMuHat, 
                                            netflow, ng, dev,
@@ -207,7 +207,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
         loss = minimise_inner(xi, theta, beta, transitions, netflow,
                               ng, ts, tau, masks, dev)
     else:
-        loss = None
+        loss = torch.tensor(0.0, device=dev)
 
 
     def transition_mu(xi, p0, q0, p1, q1, cf):
@@ -252,12 +252,14 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
            #ss_cur = walker(ss_cur)
 
     #resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0:,:,:]).sum()
-    resid = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[idx0:,:,:], masks) + 1.0 * loss.detach()
-    print("D_KL: ", resid.detach().cpu().numpy())
+    matched = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[idx0:,:,:], masks)
+    kl_div, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = matched
+    print("D_KL: ", kl_div.detach().cpu().numpy())
 
     torch.cuda.empty_cache()
 
-    return (resid, tMuHat, mu_star, loss)
+    return (kl_div + 1.0 * loss.detach(), tMuHat, mu_star, loss,
+            (cond_m_hat, cond_m_star, cond_f_hat, cond_f_star))
 
 # earlier frobenius norm matching has a margin-mismatch component, which is controlled by the markov kernel
 # and entry/exit. as a result, being a square criterion it balances this over different cells.
@@ -282,11 +284,11 @@ def conditional_kl_loss(mu_data, mu_model, masks):
         log_pmod = masked_log(p_mod, mc[:-1,:])
         row_kl = (p_hat * (log_phat - log_pmod)).sum(dim=-1)
 
-        return (S_hat.squeeze(-1) * row_kl).sum()
+        return p_hat, p_mod, (S_hat.squeeze(-1) * row_kl).sum()
 
     maskc, _ = masks
-    ckl_m = by_gender(mu_data, mu_model, maskc)
-    ckl_f = by_gender(mu_data.transpose(1,2), mu_model.transpose(1,2), maskc.T)
+    cond_m_hat, cond_m_star, ckl_m = by_gender(mu_data, mu_model, maskc)
+    cond_f_hat, cond_f_star, ckl_f = by_gender(mu_data.transpose(1,2), mu_model.transpose(1,2), maskc.T)
 
-    return ckl_m + ckl_f
+    return ckl_m + ckl_f, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star
 

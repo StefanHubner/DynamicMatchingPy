@@ -37,12 +37,12 @@ def load_data(name, dev):
 
 def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
              masks, tis, years, cf, train0):
-    _, muh1, mus, _ = match_moments(xi, theta,
+    _, muh1, mus, _, conds = match_moments(xi, theta,
                                     tPs, tQs, muh, netflow, ng,
                                     dev, tau, masks, tis, years,
                                     skiptrain = True, cf = cf,
                                     train0 = train0)
-    return muh1, mus
+    return muh1, mus, conds
 
 def main(train = False, noload = False, lbfgs = False,
          neldermead = False, matchingplot = True):
@@ -69,7 +69,7 @@ def main(train = False, noload = False, lbfgs = False,
                 ("MS", 3, masksMS, tauMS, 8,
                  range(1999, 2021), False),
               "MSclosed":
-                ("MS", 4, masksMS, tauMStrend, 8,
+                ("MS", 4, masksMS, tauMStrend, 10,
                  range(1999, 2021), False),
               "KMS":
                 ("KMS", 8, masksKMS, tauKMS, 12,
@@ -91,7 +91,7 @@ def main(train = False, noload = False, lbfgs = False,
         f = lambda n: hf_hub_download(
             repo_id = repo,
             filename = n + current + ".pt",
-            cache_dir = ".hvcache"
+            cache_dir = ".hfcache"
         )
         theta = torch.load(f("theta"),
                             weights_only = False, map_location=torch.device(dev))
@@ -182,9 +182,11 @@ def main(train = False, noload = False, lbfgs = False,
                                               "Matched Processes",
                                               "Raw",
                                               "Network"])
-        _, mu_star = load_mus(xi, theta, tPs, tQs, mu_hat, netflow, ng,
-                              "cpu", tau, masks, treat_idcs, years,
-                              cf = CF.None_, train0 = train0)
+        _, mu_star, conds = load_mus(xi, theta, tPs, tQs, mu_hat, netflow, ng,
+                                     "cpu", tau, masks, treat_idcs, years,
+                                     cf = CF.None_, train0 = train0)
+        cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
+
 
         pre = range(0, treat_idcs[0])
         post = range(treat_idcs[-1] + 1, len(tMuHat))
