@@ -108,3 +108,62 @@ def create_heatmap(tensor, x2lab, y2lab, ticklabs):
 def svg_to_data_url(svg_string):
     b64 = base64.b64encode(svg_string.encode('utf-8')).decode('utf-8')
     return f'data:image/svg+xml;base64,{b64}'
+
+import matplotlib
+import matplotlib.pyplot as plt
+import pandas as pd
+
+def plot_cf_grid(df: pd.DataFrame, sex: str = "M"):
+    cols = df.columns
+    scenario_level, sex_level, est_level, state_level = range(4)
+    mask = (
+        cols.get_level_values(scenario_level).isin(["CFF", "CF1"])
+        & (cols.get_level_values(sex_level) == sex)
+        & (cols.get_level_values(est_level) == "star")
+    )
+    state_vals = cols[mask].get_level_values(state_level)
+    states = pd.Index(state_vals).unique()
+    #states = {cols[i][state_level] for i in range(len(cols)) if mask[i]}
+    nrows, ncols = 4, 2
+    fig, axes = plt.subplots(nrows, ncols, figsize=(10, 12), sharex=True)
+    axes = axes.ravel()
+    idx = pd.IndexSlice
+    for ax, state in zip(axes, states):
+        sub = df.loc[:, idx[["CFF", "CF1"], sex, "star", state]].copy()
+        sub.columns = sub.columns.get_level_values(0)   # -> ["CFF", "CF1"]
+        sub.plot(ax=ax)
+        ax.set_title(state)
+        ax.set_xlabel("")
+        ax.legend_.remove()
+    for k in range(len(states), len(axes)):
+        axes[k].set_visible(False)
+    fig.tight_layout()
+    return fig
+
+def plot_estimator_grid(df: pd.DataFrame, sex: str = "M",
+                        scenario: str = "CFF",
+                        nrows: int = 4, ncols: int = 2):
+    cols = df.columns
+    scenario_level, sex_level, est_level, state_level = range(4)
+    mask = (
+        (cols.get_level_values(scenario_level) == scenario)
+        & (cols.get_level_values(sex_level) == sex)
+        & cols.get_level_values(est_level).isin(["star", "hat"])
+    )
+    state_vals = cols[mask].get_level_values(state_level)
+    states = pd.Index(state_vals).unique()
+    fig, axes = plt.subplots(nrows, ncols, figsize=(10, 12), sharex=True)
+    axes = axes.ravel()
+    idx = pd.IndexSlice
+    for ax, state in zip(axes, states):
+        sub = df.loc[:, idx[scenario, sex, ["star", "hat"], state]].copy()
+        sub.columns = sub.columns.get_level_values(2)   # ["star", "hat"]
+        sub.plot(ax=ax)
+        ax.set_title(str(state))
+        ax.set_xlabel("")
+        if ax.legend_ is not None:
+            ax.legend_.remove()
+    for k in range(len(states), len(axes)):
+        axes[k].set_visible(False)
+    fig.tight_layout()
+    return fig

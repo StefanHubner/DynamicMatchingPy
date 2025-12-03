@@ -4,8 +4,8 @@ from enum import Enum
 
 class CF(Enum):
     None_ = 0          # No Coutnerfactural
-    MatchingOnly = 1   # Only matching channel
-    HouseholdOnly = 2  # Only household channel
+    HighCost = 1
+    LowCost = 2
 
 class TermColours:
     BLACK   = "\033[30m"
@@ -80,6 +80,20 @@ def tauMtrend(par, t, d, dev):
     const = torch.multiply(b_const, p_const).sum(dim = 0)
     trend = t * torch.multiply(p_slope, b_slope).sum(dim = 0)
     return extend(const + trend)
+
+def tauMStri(par, t, d, dev):
+    b_const = torch.stack((
+        mbasis(3, 0, 0, dev),
+        mbasis(3, 1, 1, dev),
+        mbasis(3, 2, 2, dev),
+        mbasis(3, 2, 1, dev),
+        d * mbasis(3, 0, 0, dev),
+        d * mbasis(3, 1, 1, dev),
+        d * mbasis(3, 2, 2, dev),
+        d * mbasis(3, 2, 1, dev)))
+    p_const = par[[0, 1, 2, 3, 4, 5, 6, 7]].view(-1, 1, 1)
+    const = torch.multiply(b_const, p_const).sum(dim = 0)
+    return extend(const)
 
 def tauMS(par, t, d, dev):
     b_const = torch.stack((

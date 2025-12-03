@@ -12,7 +12,7 @@ from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF, 
 def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                    ng, dev, tau, masks, treat_idcs, years,
                    optim, cf, train0, calcgrad = True):
-    additional_outputs = [None, None, None]
+    additional_outputs = [None, None, None, None]
     def closure():
         optim.zero_grad()
         resid, ssh, sss, l, conds = match_moments(xi,
@@ -27,6 +27,7 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
         additional_outputs[0] = ssh.detach().cpu()
         additional_outputs[1] = sss.detach().cpu()
         additional_outputs[2] = l.detach().cpu()
+        additional_outputs[3] = conds.detach().cpu()
         return resid
     return closure, additional_outputs
 
@@ -220,8 +221,9 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
         def step_matching(mus): # not in use
             raise NotImplementedError()
         return {CF.None_: step,
-                CF.HouseholdOnly: step_household,
-                CF.MatchingOnly: step_matching}[cf]
+                CF.HighCost: lambda mus, t, d: step(mus, t, torch.zeros_like(d)),
+                CF.LowCost: lambda mus, t, d: step(mus, t, torch.ones_like(d))
+                }[cf]
 
     tM = tMuHat[:,:-1,:].sum(2)
     tF = tMuHat[:,:,:-1].sum(1)

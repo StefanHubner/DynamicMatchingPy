@@ -13,8 +13,8 @@ from huggingface_hub import login, whoami, hf_hub_download
 from torchviz import make_dot
 
 from dynamicmatching.bellman import match_moments, create_closure
-from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
-from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url
+from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStri, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
+from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url, plot_cf_grid, plot_estimator_grid
 from dynamicmatching.bellman import minimise_inner, choices, overallPQ
 from dynamicmatching.deeplearning import SinkhornGeneric, SinkhornMS, masked_log
 from dynamicmatching.neldermead import NelderMeadOptimizer
@@ -68,6 +68,9 @@ def main(train = False, noload = False, lbfgs = False,
               "MS":
                 ("MS", 3, masksMS, tauMS, 10,
                  range(1999, 2021), False),
+              "MStri":
+                ("MS", 3, masksMS, tauMStri, 8,
+                 range(1999, 2021), False),
               "MSclosed":
                 ("MS", 4, masksMS, tauMStrend, 8,
                  range(1999, 2021), False),
@@ -103,8 +106,11 @@ def main(train = False, noload = False, lbfgs = False,
 
     network = SinkhornGeneric(tau, ndim, outdim, thetadim)
     if load:
-        network.load_state_dict(xi_sd)
+        network.load_state_dict(xi_sd) # mutable operation
     xi = network.to(dev)
+    ng = 2**12 # max 2**19 number of draws (uniform gridpoints)
+    treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
+    xihat, thetahat = xi, theta
 
     if lbfgs:
         optim = torch.optim.LBFGS([theta],
@@ -117,10 +123,6 @@ def main(train = False, noload = False, lbfgs = False,
     else:
         optim = torch.optim.Adam([theta], lr = .1)
         num_epochs = 2000
-
-    ng = 2**12 # max 2**19 number of draws (uniform gridpoints)
-    treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
-    xihat, thetahat = xi, theta
 
     if train:
 
@@ -141,7 +143,8 @@ def main(train = False, noload = False, lbfgs = False,
         for epoch in range(1, num_epochs + 1):
             loss = optim.step(closure)
             curloss = loss.item()
-            mush, muss, l = add_outputs
+            mush, muss, l, conds = add_outputs
+            cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
             record = [curloss, l.item()]
             par = theta.cpu().detach().numpy().flatten()
             print("theta_t: {}".format(par))
@@ -160,9 +163,10 @@ def main(train = False, noload = False, lbfgs = False,
                 perc = int((epoch / num_epochs) * 100)
                 muss = muss.cpu().detach().numpy()
                 muhat = tMuHat.cpu().detach().numpy()
+                diffs = 0.5 * (cond_m_star - cond_f_hat) + 0.5 * (cond_f_star - cond_m_hat)
                 print(f"{TermColours.BRIGHT_RED}{perc}% : {loss.item():.4f} : \
                         {thetahat}: \
-                        {TermColours.GREEN}{muss - muhat} \
+                        {TermColours.GREEN}{diffs} \
                         {TermColours.RESET}",
                       end='\t', flush=True)
             history.iloc[:epoch].to_csv('training_history.csv')
@@ -182,11 +186,38 @@ def main(train = False, noload = False, lbfgs = False,
                                               "Matched Processes",
                                               "Raw",
                                               "Network"])
-        _, mu_star, conds = load_mus(xi, theta, tPs, tQs, mu_hat, netflow, ng,
-                                     "cpu", tau, masks, treat_idcs, years,
-                                     cf = CF.None_, train0 = train0)
-        cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
+        mu_stars  = {}
+        condss = {}
+        df = pd.DataFrame()
 
+        condss_names = [("M", "hat"), ("M", "star"), ("F", "hat"), ("F", "star")]
+        vars = [("U|U",   (0,0)), ("0|U",  (0,3)),
+                ("CH|CH", (1,1)), ("CW|CH", (1,2)), ("0|CH", (1,3)),
+                ("CH|CW", (2,1)), ("CW|CW", (2,2)), ("0|CW", (2,3))]
+        for n, cf in zip(["CFF", "CF0", "CF1"], [CF.None_, CF.HighCost, CF.LowCost]):
+            _, mu_stars[cf], condss[cf] = load_mus(xi, theta, tPs, tQs, mu_hat, netflow, ng,
+                                                 "cpu", tau, masks, treat_idcs, years,
+                                                  cf = cf, train0 = train0)
+            for ((s, e), t) in zip(condss_names, condss[cf]):
+                for (cond, (i, j)) in vars:
+                    df[(n, s, e, cond)] = t[:, i, j].detach().numpy()
+        df.columns = pd.MultiIndex.from_tuples(df.columns, names=["scenario", "sex", "estimator", "state"])
+
+        df.to_csv("conditional_distr.csv")
+
+        fig = plot_cf_grid(df.iloc[1:,:], sex="M")
+        fig.savefig("M_cf1_grid.pdf", bbox_inches="tight")
+        fig = plot_cf_grid(df.iloc[1:,:], sex="F")
+        fig.savefig("F_cf1_grid.pdf", bbox_inches="tight")
+
+        fig2 = plot_estimator_grid(df.iloc[1:,:], sex="M", scenario="CFF")
+        fig2.savefig("star_hat_M_grid.pdf", bbox_inches="tight")
+        fig2 = plot_estimator_grid(df.iloc[1:,:], sex="F", scenario="CFF")
+        fig2.savefig("star_hat_F_grid.pdf", bbox_inches="tight")
+
+
+        mu_star = mu_stars[CF.None_]
+        cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = condss[CF.None_]
 
         pre = range(0, treat_idcs[0])
         post = range(treat_idcs[-1] + 1, len(tMuHat))
