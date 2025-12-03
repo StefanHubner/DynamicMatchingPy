@@ -66,10 +66,10 @@ def main(train = False, noload = False, lbfgs = False,
                 ("M", 2, masksM, tauMtrend, 5,
                  range(1999, 2021), False),
               "MS":
-                ("MS", 3, masksMS, tauMS, 8,
+                ("MS", 3, masksMS, tauMS, 10,
                  range(1999, 2021), False),
               "MSclosed":
-                ("MS", 4, masksMS, tauMStrend, 10,
+                ("MS", 4, masksMS, tauMStrend, 8,
                  range(1999, 2021), False),
               "KMS":
                 ("KMS", 8, masksKMS, tauKMS, 12,
