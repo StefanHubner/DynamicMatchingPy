@@ -282,9 +282,12 @@ def conditional_kl_loss(mu_data, mu_model, masks):
         p_hat = data_rows / (S_hat + 1e-12)
         p_mod = model_rows / (S_mod + 1e-12)
 
-        log_phat = masked_log(p_hat, mc[:-1,:])
-        log_pmod = masked_log(p_mod, mc[:-1,:])
-        row_kl = (p_hat * (log_phat - log_pmod))[:,:-1].sum(dim=-1) # not include singles (redundant)
+        mask_pairs = mc[:-1, :-1]
+        log_phat = masked_log(p_hat[:, :, :-1], mask_pairs)
+        log_pmod = masked_log(p_mod[:, :, :-1], mask_pairs)
+
+        diff = log_phat - log_pmod
+        row_kl = (p_hat[:, :, :-1] * diff).sum(dim=-1)
 
         return p_hat, p_mod, (S_hat.squeeze(-1) * row_kl).sum()
 

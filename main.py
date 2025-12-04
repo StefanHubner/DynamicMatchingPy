@@ -182,6 +182,8 @@ def main(train = False, noload = False, lbfgs = False,
         theta = thetahat.cpu()
         tPs, tQs = tPs.cpu(), tQs.cpu()
         mu_hat = tMuHat.cpu()
+        pre = range(0, treat_idcs[0])
+        post = range(treat_idcs[-1] + 1, len(tMuHat))
         sandbox, process, raw, net = st.tabs(["Sandbox",
                                               "Matched Processes",
                                               "Raw",
@@ -204,10 +206,11 @@ def main(train = False, noload = False, lbfgs = False,
         df.columns = pd.MultiIndex.from_tuples(df.columns, names=["scenario", "sex", "estimator", "state"])
 
         df.to_csv("conditional_distr.csv")
+        ys = np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()
 
-        fig = plot_cf_grid(df.iloc[1:,:], sex="M")
+        fig = plot_cf_grid(df.iloc[1:,:], sex="M", years=ys[1:])
         fig.savefig("M_cf1_grid.pdf", bbox_inches="tight")
-        fig = plot_cf_grid(df.iloc[1:,:], sex="F")
+        fig = plot_cf_grid(df.iloc[1:,:], sex="F", years=ys[1:])
         fig.savefig("F_cf1_grid.pdf", bbox_inches="tight")
 
         fig2 = plot_estimator_grid(df.iloc[1:,:], sex="M", scenario="CFF")
@@ -219,8 +222,6 @@ def main(train = False, noload = False, lbfgs = False,
         mu_star = mu_stars[CF.None_]
         cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = condss[CF.None_]
 
-        pre = range(0, treat_idcs[0])
-        post = range(treat_idcs[-1] + 1, len(tMuHat))
         transitions = overallPQ(tQs, tQs, int(train0)*len(pre), 
                                 len(treat_idcs), len(post))
         tP, tQ, tP0, tQ0, tP1, tQ1 = transitions
