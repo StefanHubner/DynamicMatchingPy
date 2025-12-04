@@ -95,7 +95,7 @@ def residuals(ng0, xi, transitions, netflow,
     pm = 0.5 + (torch.rand((ng0, 1), device = dev) - 0.5) / 5
     s0 = torch.cat((dirichlet.sample((ng0, )) * pm,
                     dirichlet.sample((ng0, )) * (1-pm)), dim = 1)
-    s = s0[torch.all(s0 > 0.01, dim=1)] # 0.04 works
+    s = s0[torch.all(s0 > 0.001, dim=1)] # 0.04 works
     ng = s.shape[0]
     rts = ts[torch.randint(0, ts.numel(), (ng, 1))]
     rds = torch.randint(0, 2, (ng, 1), device = dev)
