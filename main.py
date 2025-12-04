@@ -13,7 +13,7 @@ from huggingface_hub import login, whoami, hf_hub_download
 from torchviz import make_dot
 
 from dynamicmatching.bellman import match_moments, create_closure
-from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStri, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
+from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url, plot_cf_grid, plot_estimator_grid
 from dynamicmatching.bellman import minimise_inner, choices, overallPQ
 from dynamicmatching.deeplearning import SinkhornGeneric, SinkhornMS, masked_log
@@ -70,6 +70,9 @@ def main(train = False, noload = False, lbfgs = False,
                  range(1999, 2021), False),
               "MStrend":
                 ("MS", 3, masksMS, tauMStrend, 14,
+                 range(1999, 2021), False),
+              "MScal":
+                ("MS", 3, masksMS, tauMScal, 5,
                  range(1999, 2021), False),
               "MStri":
                 ("MS", 3, masksMS, tauMStri, 8,
@@ -181,9 +184,12 @@ def main(train = False, noload = False, lbfgs = False,
         xi.eval()
         theta = thetahat.cpu()
         tPs, tQs = tPs.cpu(), tQs.cpu()
-        mu_hat = tMuHat.cpu()
         pre = range(0, treat_idcs[0])
         post = range(treat_idcs[-1] + 1, len(tMuHat))
+        transitions = overallPQ(tPs, tQs, int(train0)*len(pre),
+                                len(treat_idcs), len(post))
+        tP, tQ, tP0, tQ0, tP1, tQ1 = transitions
+        mu_hat = tMuHat.cpu()
         sandbox, process, raw, net = st.tabs(["Sandbox",
                                               "Matched Processes",
                                               "Raw",
@@ -206,6 +212,21 @@ def main(train = False, noload = False, lbfgs = False,
         df.columns = pd.MultiIndex.from_tuples(df.columns, names=["scenario", "sex", "estimator", "state"])
         df.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
 
+        mu_minus = mu_hat[treat_idcs[-1]]
+        zero, one = torch.tensor([0.0, 0.42]), torch.tensor([1.0, 0.37])
+        s_minus = torch.concatenate([mu_minus.sum(dim=1)[:-1], mu_minus.sum(dim=0)[:-1], one])
+        mu_plus = mu_hat[post[0]]
+        s_plus = torch.concatenate([mu_plus.sum(dim=1)[:-1], mu_plus.sum(dim=0)[:-1], zero])
+
+        mustar_minus, _ = xi(s_minus.unsqueeze(0))
+        mustar_plus, _ = xi(s_plus.unsqueeze(0))
+
+        s_plus_star = choices(mustar_minus, one[1].view(1,1), one[0].view(1,1),
+                              tP0, tQ0, tP1, tQ1, netflow, zero[1]-zero[0], "cpu")
+        (mustar_plus[0, 3, 2] - mustar_minus[0, 3, 2]) / s_minus[2]
+
+
+
         df.to_csv("conditional_distr.csv")
 
         fig = plot_cf_grid(df.iloc[1:,:], sex="M")
@@ -222,9 +243,6 @@ def main(train = False, noload = False, lbfgs = False,
         mu_star = mu_stars[CF.None_]
         cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = condss[CF.None_]
 
-        transitions = overallPQ(tQs, tQs, int(train0)*len(pre), 
-                                len(treat_idcs), len(post))
-        tP, tQ, tP0, tQ0, tP1, tQ1 = transitions
 
         s = st.session_state
         if 'currentyear' not in s: s.currentyear = years[0]

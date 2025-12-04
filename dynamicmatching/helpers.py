@@ -111,6 +111,22 @@ def tauMS(par, t, d, dev):
     const = torch.multiply(b_const, p_const).sum(dim = 0)
     return extend(const)
 
+def tauMScal(par, t, d, dev):
+    b_const = torch.stack((
+        mbasis(3, 0, 0, dev),
+        mbasis(3, 1, 1, dev),
+        mbasis(3, 2, 2, dev),
+        mbasis(3, 2, 1, dev),
+        mbasis(3, 1, 2, dev),
+        d * mbasis(3, 1, 1, dev),
+        d * mbasis(3, 2, 2, dev),
+        d * mbasis(3, 2, 1, dev),
+        d * mbasis(3, 1, 2, dev)))
+    psi = torch.tensor([-0.0953] * 3, device = dev)
+    p_const = torch.cat([ par[[0, 1, 2, 3, 4]], psi ]).view(-1, 1, 1)
+    const = torch.multiply(b_const, p_const).sum(dim = 0)
+    return extend(const)
+
 def tauMStrend(par, t, d, dev):
     b_const = torch.stack((
         mbasis(3, 0, 0, dev),
