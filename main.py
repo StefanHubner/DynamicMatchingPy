@@ -212,6 +212,7 @@ def main(train = False, noload = False, lbfgs = False,
         df.columns = pd.MultiIndex.from_tuples(df.columns, names=["scenario", "sex", "estimator", "state"])
         df.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
 
+        # this doesn't account for outflow of divorce state
         mu_minus = mu_hat[treat_idcs[-1]]
         zero, one = torch.tensor([0.0, 0.42]), torch.tensor([1.0, 0.37])
         s_minus = torch.concatenate([mu_minus.sum(dim=1)[:-1], mu_minus.sum(dim=0)[:-1], one])
@@ -221,11 +222,21 @@ def main(train = False, noload = False, lbfgs = False,
         mustar_minus, _ = xi(s_minus.unsqueeze(0))
         mustar_plus, _ = xi(s_plus.unsqueeze(0))
 
-        s_plus_star = choices(mustar_minus, one[1].view(1,1), one[0].view(1,1),
-                              tP0, tQ0, tP1, tQ1, netflow, zero[1]-zero[0], "cpu")
-        (mustar_plus[0, 3, 2] - mustar_minus[0, 3, 2]) / s_minus[2]
+        s_minus_star = choices(mustar_minus, one[1].view(1,1), one[0].view(1,1),
+                              tP0, tQ0, tP1, tQ1, netflow, zero[1]-one[1], "cpu")
+        s_plus_star = choices(mustar_plus, zero[1].view(1,1), zero[0].view(1,1),
+                              tP0, tQ0, tP1, tQ1, netflow, zero[1]-one[1], "cpu")
 
+        mustar_minus_next, _ = xi(s_minus_star)
+        mustar_plus_next, _ = xi(s_plus_star)
 
+        flow_minus = (mustar_minus_next - mustar_minus)[0, [1,2], 3].sum() + (mustar_minus_next - mustar_minus)[0, 3, [1,2]].sum()
+        flow_plus = (mustar_plus_next - mustar_plus)[0, [1,2], 3].sum() + (mustar_plus_next - mustar_plus)[0, 3, [1,2]].sum()
+
+        lambda_minus = flow_minus / mustar_minus[0, 1:3, 1:3].sum()
+        lambda_plus = flow_plus / mustar_plus[0, 1:3, 1:3].sum()
+        lambda_plus/lambda_minus
+        # end attempt to further calibrate psi beyond log(1.1) which is theoretically correct
 
         df.to_csv("conditional_distr.csv")
 
