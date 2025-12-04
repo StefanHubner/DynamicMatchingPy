@@ -118,6 +118,7 @@ def tauMStrend(par, t, d, dev):
         mbasis(3, 2, 2, dev),
         mbasis(3, 2, 1, dev),
         mbasis(3, 1, 2, dev),
+        d * mbasis(3, 0, 0, dev),
         d * mbasis(3, 1, 1, dev),
         d * mbasis(3, 2, 2, dev),
         d * mbasis(3, 2, 1, dev),
