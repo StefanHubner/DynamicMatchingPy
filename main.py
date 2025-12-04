@@ -68,11 +68,11 @@ def main(train = False, noload = False, lbfgs = False,
               "MS":
                 ("MS", 3, masksMS, tauMS, 10,
                  range(1999, 2021), False),
+              "MStrend":
+                ("MS", 3, masksMS, tauMStrend, 14,
+                 range(1999, 2021), False),
               "MStri":
                 ("MS", 3, masksMS, tauMStri, 8,
-                 range(1999, 2021), False),
-              "MSclosed":
-                ("MS", 4, masksMS, tauMStrend, 8,
                  range(1999, 2021), False),
               "KMS":
                 ("KMS", 8, masksKMS, tauKMS, 12,
@@ -204,13 +204,13 @@ def main(train = False, noload = False, lbfgs = False,
                 for (cond, (i, j)) in vars:
                     df[(n, s, e, cond)] = t[:, i, j].detach().numpy()
         df.columns = pd.MultiIndex.from_tuples(df.columns, names=["scenario", "sex", "estimator", "state"])
+        df.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
 
         df.to_csv("conditional_distr.csv")
-        ys = np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()
 
-        fig = plot_cf_grid(df.iloc[1:,:], sex="M", years=ys[1:])
+        fig = plot_cf_grid(df.iloc[1:,:], sex="M")
         fig.savefig("M_cf1_grid.pdf", bbox_inches="tight")
-        fig = plot_cf_grid(df.iloc[1:,:], sex="F", years=ys[1:])
+        fig = plot_cf_grid(df.iloc[1:,:], sex="F")
         fig.savefig("F_cf1_grid.pdf", bbox_inches="tight")
 
         fig2 = plot_estimator_grid(df.iloc[1:,:], sex="M", scenario="CFF")

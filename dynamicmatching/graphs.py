@@ -113,7 +113,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 
-def plot_cf_grid(df, sex, years):
+def plot_cf_grid(df, sex):
     cols = df.columns
     scenario_level, sex_level, est_level, state_level = range(4)
     mask = (
