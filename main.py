@@ -74,7 +74,7 @@ def main(train = False, noload = False, lbfgs = False,
               "MScal":
                 ("MS", 3, masksMS, tauMScal, 5,
                  range(1999, 2021), False),
-              "MStri"
+              "MStri":
                 ("MS", 3, masksMS, tauMStri, 8,
                  range(1999, 2021), False),
               "KMS":
