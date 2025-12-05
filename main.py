@@ -13,7 +13,7 @@ from huggingface_hub import login, whoami, hf_hub_download
 from torchviz import make_dot
 
 from dynamicmatching.bellman import match_moments, create_closure
-from dynamicmatching.helpers import tauM, tauMtrend, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
+from dynamicmatching.helpers import tauMcal, tauMtrend, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
 from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url, plot_cf_grid, plot_estimator_grid
 from dynamicmatching.bellman import minimise_inner, choices, overallPQ
 from dynamicmatching.deeplearning import SinkhornGeneric, SinkhornMS, masked_log
