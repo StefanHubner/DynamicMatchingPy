@@ -62,8 +62,8 @@ def main(train = False, noload = False, lbfgs = False,
     # (name, state dim, net class, masks, basis, par dim, ys, train0, name)
     current = args.spec
 
-    spec  = { "Mtrendclosed":
-                ("M", 2, masksM, tauMtrend, 5,
+    spec  = { "Mcal":
+                ("M", 2, masksM, tauMcal, 2,
                  range(1999, 2021), False),
               "MS":
                 ("MS", 3, masksMS, tauMS, 10,
@@ -74,7 +74,7 @@ def main(train = False, noload = False, lbfgs = False,
               "MScal":
                 ("MS", 3, masksMS, tauMScal, 5,
                  range(1999, 2021), False),
-              "MStri":
+              "MStri"
                 ("MS", 3, masksMS, tauMStri, 8,
                  range(1999, 2021), False),
               "KMS":

@@ -45,21 +45,7 @@ def mbasis(n, i, j, dev):
     b[i,j] = 1
     return b
 
-# tau for married only (3x3)
-def tauMold(par, treat, dev):
-    theta = par[:-1]
-    kappa = par[-1]
-    n = theta.shape[0]
-    rs = theta + vbasis(n, n - 1, dev) * kappa * treat
-    b = torch.stack((
-        mbasis(3, 0, 0, dev),
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 0, 1, dev) + mbasis(3, 1, 0, dev),
-        mbasis(3, 2, 2, dev))) # by convention the last one is (c, c)
-    return extend(torch.multiply(rs.view(-1, 1, 1), b).sum(dim=0))
-
-# tau for married new prototype (2x2) 
-def tauM(par, t, d, dev):
+def tauMcal(par, t, d, dev):
     b = torch.stack((
         mbasis(2, 0, 0, dev),
         mbasis(2, 1, 1, dev)))
