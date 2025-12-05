@@ -7,7 +7,7 @@ import pdb
 import sys
 
 from .deeplearning import masked_log
-from .helpers import tauMflex, tauM, minfb, TermColours, ManualLRScheduler, CF, extend
+from .helpers import minfb, TermColours, ManualLRScheduler, CF, extend
 
 def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                    ng, dev, tau, masks, treat_idcs, years,
