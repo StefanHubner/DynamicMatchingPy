@@ -48,7 +48,8 @@ def mbasis(n, i, j, dev):
 def tauMcal(par, t, d, dev):
     b = torch.stack((
         mbasis(2, 0, 0, dev),
-        mbasis(2, 1, 1, dev)))
+        mbasis(2, 1, 1, dev),
+        d * mbasis(2, 1, 1, dev)))
     psi = -torch.log(torch.tensor([1.1], device = dev)) # theoretical 1.1 hazard ratio at cutoff
     p = torch.cat([ par[[0, 1]], psi ]).view(-1, 1, 1)
     const = torch.multiply(b, p).sum(dim = 0)
