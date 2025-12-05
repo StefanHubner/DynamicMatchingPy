@@ -49,7 +49,10 @@ def tauMcal(par, t, d, dev):
     b = torch.stack((
         mbasis(2, 0, 0, dev),
         mbasis(2, 1, 1, dev)))
-    return extend(torch.multiply(par.view(-1, 1, 1), b).sum(dim=0))
+    psi = -torch.log(torch.tensor([1.1], device = dev)) # theoretical 1.1 hazard ratio at cutoff
+    p = torch.cat([ par[[0, 1]], psi ]).view(-1, 1, 1)
+    const = torch.multiply(b, p).sum(dim = 0)
+    return extend(const)
 
 # par = [phi_nn_0(0), phi_cc_0(0), phi_cc_1(0), Δphi_cc_0(1), Δphi_cc_1(1)]
 # where phi_mf_k(d) is utility of couples type mf for k in {0, 1} int/slope
