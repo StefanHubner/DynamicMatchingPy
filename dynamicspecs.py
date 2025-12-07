@@ -4,13 +4,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import grad as autograd_grad
 from torch.optim.lr_scheduler import MultiStepLR
-import pandas as pd
 
 RED = "\033[31m"
 RESET = "\033[0m"
 GREEN = "\033[32m"
 
-# vector basis function
 def vbasis(n, i, dev):
     b = torch.zeros(n, device = dev)
     b[i] = 1

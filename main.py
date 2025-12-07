@@ -1,39 +1,38 @@
 #!/usr/bin/env python
 
 import argparse
-import io
 import os
 import torch
 import pandas as pd
 import numpy as np
 import streamlit as st
-import matplotlib.pyplot as plt
 from datasets import load_dataset
-from huggingface_hub import login, whoami, hf_hub_download
-from torchviz import make_dot
+from huggingface_hub import login, hf_hub_download
 
-from dynamicmatching.bellman import match_moments, create_closure
-from dynamicmatching.helpers import tauMcal, tauMtrend, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
-from dynamicmatching.graphs import matched_process_plot, create_heatmap, svg_to_data_url, plot_cf_grid, plot_estimator_grid
-from dynamicmatching.bellman import minimise_inner, choices, overallPQ
-from dynamicmatching.deeplearning import SinkhornGeneric, SinkhornMS, masked_log
-from dynamicmatching.neldermead import NelderMeadOptimizer
+from dynamicmatching import match_moments, create_closure, choices, overallPQ
+from dynamicmatching import tauMcal, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
+from dynamicmatching import matched_process_plot, create_heatmap, plot_cf_grid, plot_estimator_grid
+from dynamicmatching import SinkhornGeneric
+from dynamicmatching import NelderMeadOptimizer
 
-st.set_page_config(page_title = "Dynamic Matching")
+
+st.set_page_config(page_title="Dynamic Matching")
 
 # for debug
 # noload, lbfgs, neldermead, ng0 = True, False, True, 128
 
-@st.cache_resource
+
+@st.cache_resourceyexit"][0], device=dev)
 def load_data(name, dev):
-    token = os.environ.get("HF_TOKEN") # HF_TOKEN is used by default
+    token = os.environ.get("HF_TOKEN")  # HF_TOKEN is used by default
     login(token=token, add_to_git_credential=True)
     data = load_dataset("StefanHubner/DivorceData")[name]
-    tPs = torch.tensor(data["p"][0], device = dev)
-    tQs = torch.tensor(data["q"][0], device = dev)
-    tMuHat = torch.tensor(data["couplings"][0], device = dev)
-    ee = torch.tensor(data["entryexit"][0], device = dev)
+    tPs = torch.tensor(data["p"][0], device=dev)
+    tQs = torch.tensor(data["q"][0], device=dev)
+    tMuHat = torch.tensor(data["couplings"][0], device=dev)
+    ee = torch.tensor(data["entryexit"][0], device=dev)
     return tPs, tQs, tMuHat, ee
+
 
 def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
              masks, tis, years, cf, train0):
