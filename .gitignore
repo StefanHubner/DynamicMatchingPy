@@ -9,3 +9,6 @@ matched_process.pdf
 hfdd
 .env
 .hfcache/
+*.pkl
+*.pdf
+*.csv

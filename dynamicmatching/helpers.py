@@ -112,7 +112,8 @@ def tauMScal(par, t, d, dev):
         d * mbasis(3, 2, 2, dev),
         d * mbasis(3, 2, 1, dev),
         d * mbasis(3, 1, 2, dev)))
-    psi = -torch.log(torch.tensor([1.1] * 4, device = dev)) # theoretical 1.1 hazard ratio at cutoff
+    rf = [0.046/0.035, 0.18/0.155, 0.0, 0.0]
+    psi = -torch.log(torch.tensor(rf, device = dev)) 
     p_const = torch.cat([ par[[0, 1, 2, 3, 4]], psi ]).view(-1, 1, 1)
     const = torch.multiply(b_const, p_const).sum(dim = 0)
     return extend(const)
