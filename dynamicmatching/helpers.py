@@ -112,7 +112,7 @@ def tauMScal(par, t, d, dev):
         d * mbasis(3, 2, 2, dev),
         d * mbasis(3, 2, 1, dev),
         d * mbasis(3, 1, 2, dev)))
-    rf = [0.046/0.035, 0.18/0.155, 0.0, 0.0]
+    rf = [0.046/0.035, 0.18/0.155, 1.0, 1.0] # odds ratio
     psi = -torch.log(torch.tensor(rf, device = dev)) 
     p_const = torch.cat([ par[[0, 1, 2, 3, 4]], psi ]).view(-1, 1, 1)
     const = torch.multiply(b_const, p_const).sum(dim = 0)
