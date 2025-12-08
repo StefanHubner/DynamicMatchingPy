@@ -22,7 +22,7 @@ st.set_page_config(page_title="Dynamic Matching")
 # noload, lbfgs, neldermead, ng0 = True, False, True, 128
 
 
-@st.cache_resourceyexit"][0], device=dev)
+@st.cache_resource
 def load_data(name, dev):
     token = os.environ.get("HF_TOKEN")  # HF_TOKEN is used by default
     login(token=token, add_to_git_credential=True)
