@@ -167,3 +167,30 @@ def plot_estimator_grid(df: pd.DataFrame, sex: str = "M",
         axes[k].set_visible(False)
     fig.tight_layout()
     return fig
+
+import matplotlib.pyplot as plt
+import pandas as pd
+
+def plot_margin_counterfactuals(df: pd.DataFrame,
+                                estimator: str = "star",
+                                scenarios = ("CF0", "CF1")):
+    idx = pd.IndexSlice
+    sexes  = ["M", "F"]
+    states = ["U", "CH", "CW"]
+    fig, axes = plt.subplots(2, 3, figsize=(12, 6), sharex=True)
+    axes = axes.reshape(2, 3)
+    for i, sex in enumerate(sexes):
+        for j, state in enumerate(states):
+            ax = axes[i, j]
+            sub = df.loc[:, idx[list(scenarios), sex, estimator, state]].copy()
+            # columns -> ["CF0", "CF1"]
+            sub.columns = sub.columns.get_level_values(0)
+            sub.plot(ax=ax)
+            ax.set_title(f"{sex}, {state}")
+            ax.set_xlabel("")
+            if ax.legend_ is not None:
+                #ax.legend_.set_title("scenario")
+                ax.legend_.remove()
+    fig.tight_layout()
+    return fig
+

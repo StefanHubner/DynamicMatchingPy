@@ -11,6 +11,7 @@ from huggingface_hub import login, hf_hub_download
 
 from dynamicmatching import match_moments, create_closure, choices, overallPQ
 from dynamicmatching import tauMcal, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
+from dynamicmatching import scaleMcal, scaleMScal
 from dynamicmatching import matched_process_plot, create_heatmap, plot_cf_grid, plot_estimator_grid
 from dynamicmatching import SinkhornGeneric
 from dynamicmatching import NelderMeadOptimizer
@@ -35,13 +36,13 @@ def load_data(name, dev):
 
 
 def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
-             masks, tis, years, cf, train0):
-    _, muh1, mus, _, conds = match_moments(xi, theta,
+             scale, masks, tis, years, cf, train0):
+    _, muh1, mus, _, conds, margs = match_moments(xi, theta,
                                     tPs, tQs, muh, netflow, ng,
-                                    dev, tau, masks, tis, years,
+                                    dev, tau, scale, masks, tis, years,
                                     skiptrain = True, cf = cf,
                                     train0 = train0)
-    return muh1, mus, conds
+    return muh1, mus, conds, margs
 
 def main(train = False, noload = False, lbfgs = False,
          neldermead = False, matchingplot = True):
@@ -60,30 +61,32 @@ def main(train = False, noload = False, lbfgs = False,
     # outdim = par dim + # of single types + value vct
     # (name, state dim, net class, masks, basis, par dim, ys, train0, name)
     current = args.spec
+    tpl = lambda a: (a, a)
+    scale1 = lambda d: lambda _, dev: tpl(torch.ones(d, device=dev))
 
     spec  = { "Mcal":
-                ("M", 2, masksM, tauMcal, 2,
+                ("M", 2, masksM, tauMcal, scaleMcal, 2+2,
                  range(1999, 2021), False),
               "MS":
-                ("MS", 3, masksMS, tauMS, 10,
+                ("MS", 3, masksMS, tauMS, scale1(3), 10,
                  range(1999, 2021), False),
               "MStrend":
-                ("MS", 3, masksMS, tauMStrend, 14,
+                ("MS", 3, masksMS, tauMStrend, scale1(3), 14,
                  range(1999, 2021), False),
               "MScal":
-                ("MS", 3, masksMS, tauMScal, 5,
+                ("MS", 3, masksMS, tauMScal, scaleMScal, 5+3,
                  range(1999, 2021), False),
               "MStri":
-                ("MS", 3, masksMS, tauMStri, 8,
+                ("MS", 3, masksMS, tauMStri, scale1(3), 8,
                  range(1999, 2021), False),
               "KMS":
-                ("KMS", 8, masksKMS, tauKMS, 12,
+                ("KMS", 8, masksKMS, tauKMS, scale1(8), 12,
                  range(1999, 2021), False),
               "KMSclosed":
-                ("KMS", 8, masksKMS, tauKMS, 12,
+                ("KMS", 8, masksKMS, tauKMS, scale1(8), 12,
                  range(1999, 2021), False)
              }[current]
-    vars, ndim, (maskc, mask0), tau, thetadim, years, train0 = spec
+    vars, ndim, (maskc, mask0), tau, scale, thetadim, years, train0 = spec
     outdim = thetadim + 2 * ndim + 1
     tPs, tQs, tMuHat, ee = load_data(vars, dev)
     netflow = (ee * torch.tensor([1,-1], device = dev).unsqueeze(0)).sum(1)
@@ -130,7 +133,7 @@ def main(train = False, noload = False, lbfgs = False,
 
         closure, add_outputs = create_closure(xi, theta,
                                               tPs, tQs, tMuHat, netflow,
-                                              ng, dev, tau, masks,
+                                              ng, dev, tau, scale, masks,
                                               treat_idcs, years, optim,
                                               CF.None_, train0, not neldermead)
         torch.set_printoptions(precision = 5, sci_mode=False)
@@ -195,21 +198,29 @@ def main(train = False, noload = False, lbfgs = False,
                                               "Network"])
         mu_stars  = {}
         condss = {}
+        margss = {}
         df = pd.DataFrame()
+        df1 = pd.DataFrame()
 
         condss_names = [("M", "hat"), ("M", "star"), ("F", "hat"), ("F", "star")]
         vars = [("U|U",   (0,0)), ("0|U",  (0,3)),
                 ("CH|CH", (1,1)), ("CW|CH", (1,2)), ("0|CH", (1,3)),
                 ("CH|CW", (2,1)), ("CW|CW", (2,2)), ("0|CW", (2,3))]
         for n, cf in zip(["CFF", "CF0", "CF1"], [CF.None_, CF.HighCost, CF.LowCost]):
-            _, mu_stars[cf], condss[cf] = load_mus(xi, theta, tPs, tQs, mu_hat, netflow, ng,
-                                                 "cpu", tau, masks, treat_idcs, years,
+            _, mu_stars[cf], condss[cf], margss[cf] = load_mus(xi, theta, tPs, tQs, 
+                                                  mu_hat, netflow, ng,
+                                                 "cpu", tau, scale, masks, treat_idcs, years,
                                                   cf = cf, train0 = train0)
             for ((s, e), t) in zip(condss_names, condss[cf]):
                 for (cond, (i, j)) in vars:
                     df[(n, s, e, cond)] = t[:, i, j].detach().numpy()
+            for ((s, e), t) in zip(condss_names, margss[cf]):
+                for (mg, i) in zip(["U", "CH", "CW"], [0, 1, 2]):
+                    df1[(n, s, e, mg)] = t[:, i].flatten().detach().numpy()
         df.columns = pd.MultiIndex.from_tuples(df.columns, names=["scenario", "sex", "estimator", "state"])
         df.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
+        df1.columns = pd.MultiIndex.from_tuples(df1.columns, names=["scenario", "sex", "estimator", "state"])
+        df1.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
 
         # this doesn't account for outflow of divorce state
         mu_minus = mu_hat[treat_idcs[-1]]
@@ -248,6 +259,9 @@ def main(train = False, noload = False, lbfgs = False,
         fig2.savefig("star_hat_M_grid.pdf", bbox_inches="tight")
         fig2 = plot_estimator_grid(df.iloc[1:,:], sex="F", scenario="CFF")
         fig2.savefig("star_hat_F_grid.pdf", bbox_inches="tight")
+
+        fig = plot_margin_counterfactuals(df1, estimator="star", scenarios=("CFF", "CF1"))
+        fig.savefig("margins_CF.pdf", bbox_inches="tight")
 
 
         mu_star = mu_stars[CF.None_]

@@ -10,16 +10,16 @@ from .deeplearning import masked_log
 from .helpers import minfb, TermColours, ManualLRScheduler, CF, extend
 
 def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
-                   ng, dev, tau, masks, treat_idcs, years,
+                   ng, dev, tau, scale, masks, treat_idcs, years,
                    optim, cf, train0, calcgrad = True):
     additional_outputs = [None, None, None, None]
     def closure():
         optim.zero_grad()
-        resid, ssh, sss, l, conds = match_moments(xi,
+        resid, ssh, sss, l, conds, margs = match_moments(xi,
                                            theta,
-                                           tPs, tQs, tMuHat, 
+                                           tPs, tQs, tMuHat,
                                            netflow, ng, dev,
-                                           tau, masks, treat_idcs,
+                                           tau, scale, masks, treat_idcs,
                                            years, skiptrain=False,
                                            cf = cf, train0 = train0)
         if calcgrad:
@@ -28,6 +28,7 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
         additional_outputs[1] = sss.detach().cpu()
         additional_outputs[2] = l.detach().cpu()
         additional_outputs[3] = [c.detach().cpu() for c in conds]
+        additional_outputs[4] = [mgs.detach().cpu() for mgs in margs]
         return resid
     return closure, additional_outputs
 
@@ -84,7 +85,7 @@ def check_mass(mus, s):
 
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, transitions, netflow,
-              beta, theta, tau, masks, ts, dev):
+              beta, theta, tau, scale, masks, ts, dev):
 
     maskc, mask0 = masks # maskc now has all information
     _, _, tP0, tQ0, tP1, tQ1 = transitions
@@ -123,11 +124,16 @@ def residuals(ng0, xi, transitions, netflow,
     # entropym = (masked_log(mus[:,:,-1], mask0) * mus[:,:,-1]).sum(dim=1)
     # entropy = -(2 * entropyc - entropym - entropyf)
 
+    sigma_m_type, sigma_f_type = scale(theta, dev)
     mum_cond = mus[:,:-1,:] / s[:,0:ndim].reshape((ng, ndim, 1))
     muf_cond = mus[:,:,:-1] / s[:,ndim:(2*ndim)].reshape((ng, 1, ndim))
-    entropy_c_m = mus[:,:-1,:] * masked_log(mum_cond, maskc[:-1,:])
-    entropy_c_f = mus[:,:,:-1] * masked_log(muf_cond, maskc[:,:-1])
-    entropy = -entropy_c_m.sum((1,2)) - entropy_c_f.sum((1,2))
+    log_m = masked_log(mum_cond, maskc[:-1,:])
+    log_f = masked_log(muf_cond, maskc[:,:-1])
+    H_m_by_type = (mus[:, :-1, :] * log_m).sum(dim=2)
+    H_f_by_type = (mus[:, :, :-1] * log_f).sum(dim=1)
+    entropy_c_m = (H_m_by_type * sigma_m_type).sum(dim=1)
+    entropy_c_f = (H_f_by_type * sigma_f_type).sum(dim=1)
+    entropy = -(entropy_c_m + entropy_c_f)
 
     fun = unregularised + entropy
 
@@ -152,7 +158,7 @@ def residuals(ng0, xi, transitions, netflow,
 
 
 def minimise_inner(xi, theta, beta, transitions, netflow,
-                   ng, ts, tau, masks, dev):
+                   ng, ts, tau, scale, masks, dev):
 
     epochs = 300
     optimiser = optim.Adam(xi.parameters())#, lr = .1) # , weight_decay = 0.01)
@@ -160,7 +166,7 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
     for epoch in range(0, epochs):
         optimiser.zero_grad()
         loss = residuals(ng, xi, transitions, netflow,
-                         beta, theta, tau, masks, ts, dev)
+                         beta, theta, tau, scale, masks, ts, dev)
         loss.backward(retain_graph=True)
         optimiser.step()
         if epoch < epochs - 1: # detach gradients in trajectory until (only keep for last)
@@ -178,7 +184,7 @@ def overallPQ(tPs, tQs, n0, n1, n2):
     return tP, tQ, tPs[2], tQs[2], tPs[1], tQs[1]
 
 def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
-                  ng, dev, tau, masks, treat_idcs, years,
+                  ng, dev, tau, scale, masks, treat_idcs, years,
                   skiptrain = False, cf = CF.None_, train0 = True):
 
     beta = torch.tensor(0.95, device=dev)
@@ -206,7 +212,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     if not skiptrain:
         xi.train()
         loss = minimise_inner(xi, theta, beta, transitions, netflow,
-                              ng, ts, tau, masks, dev)
+                              ng, ts, tau, scale, masks, dev)
     else:
         loss = torch.tensor(0.0, device=dev)
 
@@ -255,13 +261,14 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     #resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0:,:,:]).sum()
     matched = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[idx0:,:,:], masks)
-    kl_div, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = matched
+    kl_div, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star, m_hat, m_star, f_hat, f_star = matched
     print("D_KL: ", kl_div.detach().cpu().numpy())
 
     torch.cuda.empty_cache()
 
     return (kl_div + 2.0 * loss.detach(), tMuHat, mu_star, loss,
-            (cond_m_hat, cond_m_star, cond_f_hat, cond_f_star))
+            (cond_m_hat, cond_m_star, cond_f_hat, cond_f_star),
+            (m_hat, m_star, f_hat, f_star))
 
 # earlier frobenius norm matching has a margin-mismatch component, which is controlled by the markov kernel
 # and entry/exit. as a result, being a square criterion it balances this over different cells.
@@ -286,11 +293,11 @@ def conditional_kl_loss(mu_data, mu_model, masks):
         log_pmod = masked_log(p_mod, mc[:-1,:])
         row_kl = (p_hat * (log_phat - log_pmod)).sum(dim=-1)
 
-        return p_hat, p_mod, (S_hat.squeeze(-1) * row_kl).sum()
+        return p_hat, p_mod, S_hat, S_mod, (S_hat.squeeze(-1) * row_kl).sum()
 
     maskc, _ = masks
-    cond_m_hat, cond_m_star, ckl_m = by_gender(mu_data, mu_model, maskc)
-    cond_f_hat, cond_f_star, ckl_f = by_gender(mu_data.transpose(1,2), mu_model.transpose(1,2), maskc.T)
+    cond_m_hat, cond_m_star, m_hat, m_star, ckl_m = by_gender(mu_data, mu_model, maskc)
+    cond_f_hat, cond_f_star, f_hat, f_star, ckl_f = by_gender(mu_data.transpose(1,2), mu_model.transpose(1,2), maskc.T)
 
-    return ckl_m + ckl_f, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star
+    return ckl_m + ckl_f, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star, m_hat, m_star, f_hat, f_star
 
