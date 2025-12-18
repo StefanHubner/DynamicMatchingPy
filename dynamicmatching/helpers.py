@@ -56,7 +56,7 @@ def tauMcal(par, t, d, dev):
     return extend(const)
 
 def scaleMcal(par, dev):
-    one = torch.ones(1, device=dev).unsqueeze()
+    one = torch.ones(1, device=dev)
     a = torch.cat([one, torch.exp(par[2:])])
     return a, a
 
@@ -124,7 +124,7 @@ def tauMScal(par, t, d, dev):
     return extend(const)
 
 def scaleMScal(par, dev):
-    one = torch.ones(1, device=dev).unsqueeze()
+    one = torch.ones(1, device=dev)
     a = torch.cat([one, torch.exp(par[5:])])
     return a, a
 
@@ -154,7 +154,7 @@ def tauMScaltrend(par, t, d, dev):
     return extend(const + trend)
 
 def scaleMScaltrend(par, dev):
-    one = torch.ones(1, device=dev).unsqueeze()
+    one = torch.ones(1, device=dev)
     a = torch.cat([one, torch.exp(par[10:])])
     return a, a
 
