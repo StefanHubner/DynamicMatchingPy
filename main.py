@@ -65,37 +65,38 @@ def main(train = False, noload = False, lbfgs = False,
     scale1 = lambda d: lambda _, dev: tpl(torch.ones(d, device=dev))
 
     spec  = { "Mcal1":
-                ("M", 2, masksM, tauMcal, scale1(2), 2,
+                ("M", 2, masksM, tauMcal, scale1(2), 2, None,
                  range(1999, 2021), False),
               "Mcal":
-                ("M", 2, masksM, tauMcal, scaleMcal, 2+1,
+                ("M", 2, masksM, tauMcal, scaleMcal, 2+1, None,
                  range(1999, 2021), False),
               "MS":
-                ("MS", 3, masksMS, tauMS, scale1(3), 10,
+                ("MS", 3, masksMS, tauMS, scale1(3), 10, None,
                  range(1999, 2021), False),
               "MStrend":
-                ("MS", 3, masksMS, tauMStrend, scale1(3), 14,
+                ("MS", 3, masksMS, tauMStrend, scale1(3), 14, None,
                  range(1999, 2021), False),
               "MScal1":
-                ("MS", 3, masksMS, tauMScal, scale1(3), 5,
+                ("MS", 3, masksMS, tauMScal, scale1(3), 5, None,
                  range(1999, 2021), False),
               "MScal":
-                ("MS", 3, masksMS, tauMScal, scaleMScal, 5+2,
+                ("MS", 3, masksMS, tauMScal, scaleMScal, 5+2, None,
                  range(1999, 2021), False),
               "MScaltrend":
                 ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2,
+                [-1.13, 1.64, 1.90, 1.47, 0.55, 0, 0, 0, 0, 0, -1.37, -1.26],
                  range(1999, 2021), False),
               "MStri":
-                ("MS", 3, masksMS, tauMStri, scale1(3), 8,
+                ("MS", 3, masksMS, tauMStri, scale1(3), 8, None,
                  range(1999, 2021), False),
               "KMS":
-                ("KMS", 8, masksKMS, tauKMS, scale1(8), 12,
+                ("KMS", 8, masksKMS, tauKMS, scale1(8), 12, None,
                  range(1999, 2021), False),
               "KMSclosed":
-                ("KMS", 8, masksKMS, tauKMS, scale1(8), 12,
+                ("KMS", 8, masksKMS, tauKMS, scale1(8), 12, None,
                  range(1999, 2021), False)
              }[current]
-    vars, ndim, (maskc, mask0), tau, scale, thetadim, years, train0 = spec
+    vars, ndim, (maskc, mask0), tau, scale, thetadim, theta0, years, train0 = spec
     outdim = thetadim + 2 * ndim + 1
     tPs, tQs, tMuHat, ee = load_data(vars, dev)
     netflow = (ee * torch.tensor([1,-1], device = dev).unsqueeze(0)).sum(1)
@@ -115,7 +116,8 @@ def main(train = False, noload = False, lbfgs = False,
         xi_sd = torch.load(f("xi"),
                             weights_only = False, map_location=torch.device(dev))
     else:
-        theta = torch.tensor(thetadim * [0.1], dtype=torch.float32,
+        theta0 = thetadim * [0.1] if theta0 is None else theta0
+        theta = torch.tensor(theta0, dtype=torch.float32,
                              device=dev, requires_grad = True)
 
     network = SinkhornGeneric(tau, ndim, outdim, thetadim)
