@@ -68,7 +68,7 @@ def main(train = False, noload = False, lbfgs = False,
                 ("M", 2, masksM, tauMcal, scale1(2), 2,
                  range(1999, 2021), False),
               "Mcal":
-                ("M", 2, masksM, tauMcal, scaleMcal, 2+2,
+                ("M", 2, masksM, tauMcal, scaleMcal, 2+1,
                  range(1999, 2021), False),
               "MS":
                 ("MS", 3, masksMS, tauMS, scale1(3), 10,
@@ -80,10 +80,10 @@ def main(train = False, noload = False, lbfgs = False,
                 ("MS", 3, masksMS, tauMScal, scale1(3), 5,
                  range(1999, 2021), False),
               "MScal":
-                ("MS", 3, masksMS, tauMScal, scaleMScal, 5+3,
+                ("MS", 3, masksMS, tauMScal, scaleMScal, 5+2,
                  range(1999, 2021), False),
               "MScaltrend":
-                ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+3,
+                ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2,
                  range(1999, 2021), False),
               "MStri":
                 ("MS", 3, masksMS, tauMStri, scale1(3), 8,

@@ -56,7 +56,9 @@ def tauMcal(par, t, d, dev):
     return extend(const)
 
 def scaleMcal(par, dev):
-    return torch.exp(par[2:]), torch.exp(par[2:])
+    one = torch.ones(1, device=dev).unsqueeze()
+    a = torch.cat([one, torch.exp(par[2:])])
+    return a, a
 
 # par = [phi_nn_0(0), phi_cc_0(0), phi_cc_1(0), Δphi_cc_0(1), Δphi_cc_1(1)]
 # where phi_mf_k(d) is utility of couples type mf for k in {0, 1} int/slope
@@ -122,7 +124,9 @@ def tauMScal(par, t, d, dev):
     return extend(const)
 
 def scaleMScal(par, dev):
-    return torch.exp(par[5:]), torch.exp(par[5:])
+    one = torch.ones(1, device=dev).unsqueeze()
+    a = torch.cat([one, torch.exp(par[5:])])
+    return a, a
 
 def tauMScaltrend(par, t, d, dev):
     b_const = torch.stack((
@@ -150,7 +154,9 @@ def tauMScaltrend(par, t, d, dev):
     return extend(const + trend)
 
 def scaleMScaltrend(par, dev):
-    return torch.exp(par[10:]), torch.exp(par[10:])
+    one = torch.ones(1, device=dev).unsqueeze()
+    a = torch.cat([one, torch.exp(par[10:])])
+    return a, a
 
 def tauMStrend(par, t, d, dev):
     b_const = torch.stack((
