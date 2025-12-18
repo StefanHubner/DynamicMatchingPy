@@ -1,5 +1,5 @@
 from .bellman import match_moments, create_closure, choices, overallPQ
-from .helpers import tauMcal, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
+from .helpers import scaleMcal, scaleMScal, tauMcal, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
 from .graphs import matched_process_plot, create_heatmap, plot_cf_grid, plot_estimator_grid
 from .deeplearning import SinkhornGeneric
 from .neldermead import NelderMeadOptimizer
