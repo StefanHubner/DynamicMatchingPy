@@ -11,8 +11,8 @@ from huggingface_hub import login, hf_hub_download
 
 from dynamicmatching import match_moments, create_closure, choices, overallPQ
 from dynamicmatching import tauMcal, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
-from dynamicmatching import scaleMcal, scaleMScal
-from dynamicmatching import matched_process_plot, create_heatmap, plot_cf_grid, plot_estimator_grid
+from dynamicmatching import scaleMcal, scaleMScal, scaleMScaltrend, tauMScaltrend
+from dynamicmatching import matched_process_plot, create_heatmap, plot_cf_grid, plot_estimator_grid, plot_margin_counterfactuals
 from dynamicmatching import SinkhornGeneric
 from dynamicmatching import NelderMeadOptimizer
 
@@ -45,7 +45,7 @@ def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
     return muh1, mus, conds, margs
 
 def main(train = False, noload = False, lbfgs = False,
-         neldermead = False, matchingplot = True):
+         neldermead = False, matchingplot = False):
 
     torch.set_printoptions(precision=4, sci_mode=False)
     if torch.cuda.is_available():
@@ -81,6 +81,9 @@ def main(train = False, noload = False, lbfgs = False,
                  range(1999, 2021), False),
               "MScal":
                 ("MS", 3, masksMS, tauMScal, scaleMScal, 5+3,
+                 range(1999, 2021), False),
+              "MScaltrend":
+                ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+3,
                  range(1999, 2021), False),
               "MStri":
                 ("MS", 3, masksMS, tauMStri, scale1(3), 8,
@@ -269,6 +272,8 @@ def main(train = False, noload = False, lbfgs = False,
         fig = plot_margin_counterfactuals(df1, estimator="star", scenarios=("CFF", "CF1"))
         fig.savefig("margins_CF.pdf", bbox_inches="tight")
 
+        if matchingplot:
+            return
 
         mu_star = mu_stars[CF.None_]
         cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = condss[CF.None_]
@@ -504,6 +509,6 @@ if __name__ == "__main__":
                         help="Use Nelder-Mead optim instead of Adam for outer.")
     parser.add_argument("--matchingplot",
                         action="store_true",
-                        help="Run this script in streamlit.")
+                        help="Run this script only to generate plots.")
     args = parser.parse_args()
     main(args.train, args.noload, args.lbfgs, args.neldermead, args.matchingplot)
