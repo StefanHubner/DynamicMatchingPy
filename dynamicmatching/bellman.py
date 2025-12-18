@@ -12,7 +12,7 @@ from .helpers import minfb, TermColours, ManualLRScheduler, CF, extend
 def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                    ng, dev, tau, scale, masks, treat_idcs, years,
                    optim, cf, train0, calcgrad = True):
-    additional_outputs = [None, None, None, None]
+    additional_outputs = [None, None, None, None, None]
     def closure():
         optim.zero_grad()
         resid, ssh, sss, l, conds, margs = match_moments(xi,

@@ -154,7 +154,7 @@ def main(train = False, noload = False, lbfgs = False,
         for epoch in range(1, num_epochs + 1):
             loss = optim.step(closure)
             curloss = loss.item()
-            mush, muss, l, conds = add_outputs
+            mush, muss, l, conds, margs = add_outputs
             cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
             record = [curloss, l.item()]
             par = theta.cpu().detach().numpy().flatten()
