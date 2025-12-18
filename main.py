@@ -64,7 +64,10 @@ def main(train = False, noload = False, lbfgs = False,
     tpl = lambda a: (a, a)
     scale1 = lambda d: lambda _, dev: tpl(torch.ones(d, device=dev))
 
-    spec  = { "Mcal":
+    spec  = { "Mcal1":
+                ("M", 2, masksM, tauMcal, scale1(2), 2,
+                 range(1999, 2021), False),
+              "Mcal":
                 ("M", 2, masksM, tauMcal, scaleMcal, 2+2,
                  range(1999, 2021), False),
               "MS":
@@ -72,6 +75,9 @@ def main(train = False, noload = False, lbfgs = False,
                  range(1999, 2021), False),
               "MStrend":
                 ("MS", 3, masksMS, tauMStrend, scale1(3), 14,
+                 range(1999, 2021), False),
+              "MScal1":
+                ("MS", 3, masksMS, tauMScal, scale1(3), 5,
                  range(1999, 2021), False),
               "MScal":
                 ("MS", 3, masksMS, tauMScal, scaleMScal, 5+3,
