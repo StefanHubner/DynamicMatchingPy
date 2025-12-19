@@ -161,7 +161,7 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
                    ng, ts, tau, scale, masks, dev):
 
     epochs = 300
-    optimiser = optim.Adam(xi.parameters())#, lr = .1) # , weight_decay = 0.01)
+    optimiser = optim.Adam(xi.parameters())  #, lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):
         optimiser.zero_grad()
@@ -169,7 +169,7 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
                          beta, theta, tau, scale, masks, ts, dev)
         loss.backward(retain_graph=True)
         optimiser.step()
-        if epoch < epochs - 1: # detach gradients in trajectory until (only keep for last)
+        if epoch < epochs - 1: # detach gradients in trajectory (only keep for last)
             for param in xi.parameters():
                 param.data = param.data.detach()
         grad_norm = check_grad_norm(optimiser)

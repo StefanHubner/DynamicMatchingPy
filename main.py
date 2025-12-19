@@ -176,12 +176,12 @@ def main(train = False, noload = False, lbfgs = False,
             perc = int((epoch / num_epochs) * 100)
             diffs = 0.5 * (cond_m_star - cond_f_hat) + 0.5 * (cond_f_star - cond_m_hat)
             print(f"{TermColours.BRIGHT_RED}{perc}% : {losshat:.4f} : \
-                    {thetahat}: \
+                    {thetahat}: \r\n \
                     {TermColours.GREEN}{diffs} \
                     {TermColours.RESET}",
                   end='\t', flush=True)
 
-            history.loc[epoch] = [curloss, l.item(), par]
+            history.loc[epoch] = [curloss, l.item()] + par.tolist()
             history.iloc[:epoch].to_csv('training_history.csv')
 
         print(thetahat)
