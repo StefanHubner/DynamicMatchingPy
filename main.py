@@ -126,8 +126,8 @@ def main(train = False, noload = False, lbfgs = False,
         network.load_state_dict(xi_sd) # mutable operation
     xi = network.to(dev)
     ng = 2**12 # max 2**19 number of draws (uniform gridpoints)
-    treat_idcs = [i for i,t in enumerate(years) if 2001 <= t <= 2008]
-    xihat, thetahat = xi, theta
+    treat_idcs = [i for i, t in enumerate(years) if 2001 <= t <= 2008]
+    xihat, thetahat, losshat = deepcopy(xi), theta.detach().clone(), 10e30
 
     if lbfgs:
         optim = torch.optim.LBFGS([theta],
@@ -149,22 +149,19 @@ def main(train = False, noload = False, lbfgs = False,
                                               treat_idcs, years, optim,
                                               CF.None_, train0, not neldermead)
         torch.set_printoptions(precision = 5, sci_mode=False)
-        columns = ['loss', 'l']
-        for i in range(theta.shape[0]):
-            columns.append(f'theta{i}')
+
+        columns = ['loss', 'l'] + [f'theta{i}' for i in range(thetadim)]
         history = pd.DataFrame(index=np.arange(1, num_epochs+1),
                                columns=columns)
 
-        losshat = 10e30
         hfpath = "./hfdd/"
         for epoch in range(1, num_epochs + 1):
             loss = optim.step(closure)
             curloss = loss.cpu().detach().clone().item()
             mush, muss, l, conds, margs = add_outputs
             cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
-            record = [curloss, l.item()]
             par = theta.cpu().detach().numpy().flatten()
-            print("theta_t: {}".format(par))
+            print(f"theta_t: {TermColours.CYAN}{par}{TermColours.RESET}")
             if curloss < losshat:
                 losshat = deepcopy(curloss)  # force value assignment
                 thetahat = theta.detach().clone()
@@ -176,18 +173,15 @@ def main(train = False, noload = False, lbfgs = False,
             else:
                 print("previous loss: {} < loss: {}".format(losshat, curloss))
 
-            record.extend(par)
-            history.loc[epoch] = record
-            if True: # loss <= losshat:
-                perc = int((epoch / num_epochs) * 100)
-                muss = muss.cpu().detach().numpy()
-                muhat = tMuHat.cpu().detach().numpy()
-                diffs = 0.5 * (cond_m_star - cond_f_hat) + 0.5 * (cond_f_star - cond_m_hat)
-                print(f"{TermColours.BRIGHT_RED}{perc}% : {loss.item():.4f} : \
-                        {thetahat}: \
-                        {TermColours.GREEN}{diffs} \
-                        {TermColours.RESET}",
-                      end='\t', flush=True)
+            perc = int((epoch / num_epochs) * 100)
+            diffs = 0.5 * (cond_m_star - cond_f_hat) + 0.5 * (cond_f_star - cond_m_hat)
+            print(f"{TermColours.BRIGHT_RED}{perc}% : {losshat:.4f} : \
+                    {thetahat}: \
+                    {TermColours.GREEN}{diffs} \
+                    {TermColours.RESET}",
+                  end='\t', flush=True)
+
+            history.loc[epoch] = [curloss, l.item(), par]
             history.iloc[:epoch].to_csv('training_history.csv')
 
         print(thetahat)
