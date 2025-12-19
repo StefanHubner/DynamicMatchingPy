@@ -8,6 +8,7 @@ import numpy as np
 import streamlit as st
 from datasets import load_dataset
 from huggingface_hub import login, hf_hub_download
+from copy import deepcopy
 
 from dynamicmatching import match_moments, create_closure, choices, overallPQ
 from dynamicmatching import tauMcal, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
@@ -154,25 +155,27 @@ def main(train = False, noload = False, lbfgs = False,
         history = pd.DataFrame(index=np.arange(1, num_epochs+1),
                                columns=columns)
 
-        losshat = 10e30 #torch.tensor(10e30, device=dev)
+        losshat = 10e30
         hfpath = "./hfdd/"
         for epoch in range(1, num_epochs + 1):
             loss = optim.step(closure)
-            curloss = loss.item()
+            curloss = loss.cpu().detach().clone().item()
             mush, muss, l, conds, margs = add_outputs
             cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
             record = [curloss, l.item()]
             par = theta.cpu().detach().numpy().flatten()
             print("theta_t: {}".format(par))
             if curloss < losshat:
-                losshat = curloss
-                xihat, thetahat = xi, theta
+                losshat = deepcopy(curloss)  # force value assignment
+                thetahat = theta.detach().clone()
+                xihat = deepcopy(xi)
                 print("Saving tensors")
                 torch.save(thetahat, hfpath + "theta" + current + ".pt")
                 torch.save(xihat.state_dict(),
                            hfpath + "xi" + current + ".pt")
             else:
                 print("previous loss: {} < loss: {}".format(losshat, curloss))
+
             record.extend(par)
             history.loc[epoch] = record
             if True: # loss <= losshat:
