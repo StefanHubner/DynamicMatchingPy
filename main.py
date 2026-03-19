@@ -204,16 +204,21 @@ def main(train = False, noload = False, lbfgs = False,
                                               "Matched Processes",
                                               "Raw",
                                               "Network"])
+
         mu_stars  = {}
         condss = {}
         margss = {}
         df = pd.DataFrame()
         df1 = pd.DataFrame()
-
+        df2 = pd.DataFrame()
         condss_names = [("M", "hat"), ("M", "star"), ("F", "hat"), ("F", "star")]
         vars = [("U|U",   (0,0)), ("0|U",  (0,3)),
                 ("CH|CH", (1,1)), ("CW|CH", (1,2)), ("0|CH", (1,3)),
                 ("CH|CW", (2,1)), ("CW|CW", (2,2)), ("0|CW", (2,3))]
+        joint_vars = [("U,U",   (0,0)), ("U,0",  (0,3)),
+                      ("CH,CH", (1,1)), ("CH,CW", (1,2)), ("CH,0", (1,3)),
+                      ("CW,CH", (2,1)), ("CW,CW", (2,2)), ("CW,0", (2,3)),
+                      ("0,U",   (3,0)), ("0,CH", (3,1)), ("0,CW", (3,2))]
         for n, cf in zip(["CFF", "CF0", "CF1"], [CF.None_, CF.HighCost, CF.LowCost]):
             _, mu_stars[cf], condss[cf], margss[cf] = load_mus(xi, theta, tPs, tQs, 
                                                   mu_hat, netflow, ng,
@@ -225,12 +230,18 @@ def main(train = False, noload = False, lbfgs = False,
             for ((s, e), t) in zip(condss_names, margss[cf]):
                 for (mg, i) in zip(["U", "CH", "CW"], [0, 1, 2]):
                     df1[(n, s, e, mg)] = t[:, i].flatten().detach().numpy()
+            for ((s, e), t) in zip(condss_names, mu_stars[cf]):
+                for (jnt, (i, j)) in joint_vars:
+                    df2[(n, "both", "star", jnt)] = mu_stars[cf][(0 if train0 else 2):, i, j].detach().numpy()
         df.columns = pd.MultiIndex.from_tuples(df.columns, names=["scenario", "sex", "estimator", "state"])
         df.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
         df1.columns = pd.MultiIndex.from_tuples(df1.columns, names=["scenario", "sex", "estimator", "state"])
         df1.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
+        df2.columns = pd.MultiIndex.from_tuples(df2.columns, names=["scenario", "sex", "estimator", "state"])
+        df2.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
 
-        # this doesn't account for outflow of divorce state
+
+        # attempt start. this doesn't account for outflow of divorce state
         mu_minus = mu_hat[treat_idcs[-1]]
         zero, one = torch.tensor([0.0, 0.42]), torch.tensor([1.0, 0.37])
         s_minus = torch.concatenate([mu_minus.sum(dim=1)[:-1], mu_minus.sum(dim=0)[:-1], one])
@@ -267,6 +278,9 @@ def main(train = False, noload = False, lbfgs = False,
         fig2.savefig("star_hat_M_grid.pdf", bbox_inches="tight")
         fig2 = plot_estimator_grid(df.iloc[1:,:], sex="F", scenario="CFF")
         fig2.savefig("star_hat_F_grid.pdf", bbox_inches="tight")
+
+        fig3 = plot_cf_grid(df2.iloc[1:,:], sex="both", dim = (4, 3))
+        fig3.savefig("joint_cf1_grid.pdf", bbox_inches="tight")
 
         fig = plot_margin_counterfactuals(df1, estimator="star", scenarios=("CFF", "CF1"))
         fig.savefig("margins_CF.pdf", bbox_inches="tight")

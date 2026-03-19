@@ -128,6 +128,7 @@ def plot_cf_grid(df, sex):
     fig, axes = plt.subplots(nrows, ncols, figsize=(10, 12), sharex=True)
     axes = axes.ravel()
     idx = pd.IndexSlice
+    ranges = []
     for ax, state in zip(axes, states):
         sub = df.loc[:, idx[["CFF", "CF1"], sex, "star", state]].copy()
         sub.columns = sub.columns.get_level_values(0)   # -> ["CFF", "CF1"]
@@ -135,6 +136,13 @@ def plot_cf_grid(df, sex):
         ax.set_title(state)
         ax.set_xlabel("")
         ax.legend_.remove()
+        ymin, ymax = ax.get_ylim()
+        ranges.append(ymax - ymin)
+    max_range = max(ranges)
+    for ax in axes[:len(states)]:
+        ymin, ymax = ax.get_ylim()
+        mid = (ymin + ymax) / 2
+        ax.set_ylim(mid - max_range / 2, mid + max_range / 2)
     for k in range(len(states), len(axes)):
         axes[k].set_visible(False)
     fig.tight_layout()
@@ -152,12 +160,12 @@ def plot_estimator_grid(df: pd.DataFrame, sex: str = "M",
     )
     state_vals = cols[mask].get_level_values(state_level)
     states = pd.Index(state_vals).unique()
-    fig, axes = plt.subplots(nrows, ncols, figsize=(10, 12), sharex=True)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(10, 12), sharex=True, sharey=True)
     axes = axes.ravel()
     idx = pd.IndexSlice
     for ax, state in zip(axes, states):
         sub = df.loc[:, idx[scenario, sex, ["star", "hat"], state]].copy()
-        sub.columns = sub.columns.get_level_values(2)   # ["star", "hat"]
+        sub.columns = sub.columns.get_level_values(2)
         sub.plot(ax=ax)
         ax.set_title(str(state))
         ax.set_xlabel("")
@@ -165,11 +173,15 @@ def plot_estimator_grid(df: pd.DataFrame, sex: str = "M",
             ax.legend_.remove()
     for k in range(len(states), len(axes)):
         axes[k].set_visible(False)
+    # equalise y-scale
+    visible = axes[:len(states)]
+    max_range = max(ax.get_ylim()[1] - ax.get_ylim()[0] for ax in visible)
+    for ax in visible:
+        ymin, ymax = ax.get_ylim()
+        mid = (ymin + ymax) / 2
+        ax.set_ylim(mid - max_range / 2, mid + max_range / 2)
     fig.tight_layout()
     return fig
-
-import matplotlib.pyplot as plt
-import pandas as pd
 
 def plot_margin_counterfactuals(df: pd.DataFrame,
                                 estimator: str = "star",
@@ -183,14 +195,18 @@ def plot_margin_counterfactuals(df: pd.DataFrame,
         for j, state in enumerate(states):
             ax = axes[i, j]
             sub = df.loc[:, idx[list(scenarios), sex, estimator, state]].copy()
-            # columns -> ["CF0", "CF1"]
             sub.columns = sub.columns.get_level_values(0)
             sub.plot(ax=ax)
             ax.set_title(f"{sex}, {state}")
             ax.set_xlabel("")
             if ax.legend_ is not None:
-                #ax.legend_.set_title("scenario")
                 ax.legend_.remove()
+    # equalise y-scale across all panels
+    all_axes = axes.ravel()
+    max_range = max(ax.get_ylim()[1] - ax.get_ylim()[0] for ax in all_axes)
+    for ax in all_axes:
+        ymin, ymax = ax.get_ylim()
+        mid = (ymin + ymax) / 2
+        ax.set_ylim(mid - max_range / 2, mid + max_range / 2)
     fig.tight_layout()
     return fig
-
