@@ -87,6 +87,9 @@ def main(train = False, noload = False, lbfgs = False,
                 ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2,
                 [-1.13, 1.64, 1.90, 1.47, 0.55, 0, 0, 0, 0, 0, -1.37, -1.26],
                  range(1999, 2021), False),
+              "MScaltrend2":
+                ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2, None,
+                 range(1999, 2021), False),
               "MStri":
                 ("MS", 3, masksMS, tauMStri, scale1(3), 8, None,
                  range(1999, 2021), False),
