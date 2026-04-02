@@ -21,7 +21,8 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                                               netflow, ng, dev,
                                               tau, scale, masks, treat_idcs,
                                               years, skiptrain=False,
-                                              cf = cf, train0 = train0)
+                                              cf = cf, train0 = train0,
+                                              beyond = 0)
         if calcgrad:
             resid.backward()
         additional_outputs[0] = ssh.detach().cpu()
@@ -261,7 +262,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
             mu_cur, v = walker(mu_cur, ts[i].view(1,1), d.view(1,1)) # ts[i] to be safe
             v_star[i, :] = v
 
-    star_idcs = range(idx0, nT - beyond)
+    star_idcs = range(idx0, len(mu_star) - beyond)
     matched = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[star_idcs,:,:], masks)
     kl_div, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star, m_hat, m_star, f_hat, f_star = matched
     print("D_KL: ", kl_div.detach().cpu().numpy())
