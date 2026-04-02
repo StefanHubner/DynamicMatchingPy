@@ -37,13 +37,13 @@ def load_data(name, dev):
 
 
 def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
-             scale, masks, tis, years, cf, train0):
-    _, muh1, mus, _, conds, margs = match_moments(xi, theta,
-                                    tPs, tQs, muh, netflow, ng,
-                                    dev, tau, scale, masks, tis, years,
-                                    skiptrain = True, cf = cf,
-                                    train0 = train0)
-    return muh1, mus, conds, margs
+             scale, masks, tis, years, cf, train0, beyond):
+    _, muh1, mus, _, conds, margs, vs = match_moments(xi, theta,
+                                        tPs, tQs, muh, netflow, ng,
+                                        dev, tau, scale, masks, tis, years,
+                                        skiptrain = True, cf = cf,
+                                        train0 = train0, beyond = beyond)
+    return muh1, mus, conds, margs, vs
 
 def main(train = False, noload = False, lbfgs = False,
          neldermead = False, matchingplot = False):
@@ -81,7 +81,7 @@ def main(train = False, noload = False, lbfgs = False,
                 ("MS", 3, masksMS, tauMScal, scale1(3), 5, None,
                  range(1999, 2021), False),
               "MScal":
-                ("MS", 3, masksMS, tauMScal, scaleMScal, 5+2, None,
+                ("MS", 3, masksMS, tauMScal, scaleMScal, 5+3, None,
                  range(1999, 2021), False),
               "MScaltrend":
                 ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2,
@@ -205,27 +205,30 @@ def main(train = False, noload = False, lbfgs = False,
                                               "Raw",
                                               "Network"])
 
+        beyond = 20
         mu_stars  = {}
         condss = {}
         margss = {}
+        vs = {}
         df = pd.DataFrame()
         df1 = pd.DataFrame()
         df2 = pd.DataFrame()
+        df3 = pd.DataFrame()
         condss_names = [("M", "hat"), ("M", "star"), ("F", "hat"), ("F", "star")]
-        vars = [("U|U",   (0,0)), ("0|U",  (0,3)),
+        vrs   = [("U|U",   (0,0)), ("0|U",  (0,3)),
                 ("CH|CH", (1,1)), ("CW|CH", (1,2)), ("0|CH", (1,3)),
                 ("CH|CW", (2,1)), ("CW|CW", (2,2)), ("0|CW", (2,3))]
         joint_vars = [("U,U",   (0,0)), ("U,0",  (0,3)),
-                      ("CH,CH", (1,1)), ("CH,CW", (1,2)), ("CH,0", (1,3)),
+                      ("CH,CH", (1,1)), #("CH,CW", (1,2)), ("CH,0", (1,3)),
                       ("CW,CH", (2,1)), ("CW,CW", (2,2)), ("CW,0", (2,3)),
                       ("0,U",   (3,0)), ("0,CH", (3,1)), ("0,CW", (3,2))]
         for n, cf in zip(["CFF", "CF0", "CF1"], [CF.None_, CF.HighCost, CF.LowCost]):
-            _, mu_stars[cf], condss[cf], margss[cf] = load_mus(xi, theta, tPs, tQs, 
+            _, mu_stars[cf], condss[cf], margss[cf], vs[cf] = load_mus(xi, theta, tPs, tQs, 
                                                   mu_hat, netflow, ng,
                                                  "cpu", tau, scale, masks, treat_idcs, years,
-                                                  cf = cf, train0 = train0)
+                                                  cf = cf, train0 = train0, beyond = beyond)
             for ((s, e), t) in zip(condss_names, condss[cf]):
-                for (cond, (i, j)) in vars:
+                for (cond, (i, j)) in vrs:
                     df[(n, s, e, cond)] = t[:, i, j].detach().numpy()
             for ((s, e), t) in zip(condss_names, margss[cf]):
                 for (mg, i) in zip(["U", "CH", "CW"], [0, 1, 2]):
@@ -233,41 +236,19 @@ def main(train = False, noload = False, lbfgs = False,
             for ((s, e), t) in zip(condss_names, mu_stars[cf]):
                 for (jnt, (i, j)) in joint_vars:
                     df2[(n, "both", "star", jnt)] = mu_stars[cf][(0 if train0 else 2):, i, j].detach().numpy()
+            df3[(n, "both", "star", "V")] = vs[cf][(0 if train0 else 2):, 0].detach().numpy() 
+
+        xax = range(years.start, years.stop+beyond)
+        lyears = [f"{l}" for l in np.array(list(xax))[pre if train0 else [] + treat_idcs + list(post) + list(range(post.stop, post.stop+beyond))].tolist()]
         df.columns = pd.MultiIndex.from_tuples(df.columns, names=["scenario", "sex", "estimator", "state"])
-        df.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
+        df.index = [f"{l}" for l in np.array(list(xax))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
         df1.columns = pd.MultiIndex.from_tuples(df1.columns, names=["scenario", "sex", "estimator", "state"])
-        df1.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
+        df1.index = [f"{l}" for l in np.array(list(xax))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
         df2.columns = pd.MultiIndex.from_tuples(df2.columns, names=["scenario", "sex", "estimator", "state"])
-        df2.index = [f"{l}" for l in np.array(list(years))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
+        df2.index = lyears
+        df3.columns = pd.MultiIndex.from_tuples(df3.columns, names=["scenario", "sex", "estimator", "state"])
+        df3.index = lyears
 
-
-        # attempt start. this doesn't account for outflow of divorce state
-        mu_minus = mu_hat[treat_idcs[-1]]
-        zero, one = torch.tensor([0.0, 0.42]), torch.tensor([1.0, 0.37])
-        s_minus = torch.concatenate([mu_minus.sum(dim=1)[:-1], mu_minus.sum(dim=0)[:-1], one])
-        mu_plus = mu_hat[post[0]]
-        s_plus = torch.concatenate([mu_plus.sum(dim=1)[:-1], mu_plus.sum(dim=0)[:-1], zero])
-
-        mustar_minus, _ = xi(s_minus.unsqueeze(0))
-        mustar_plus, _ = xi(s_plus.unsqueeze(0))
-
-        s_minus_star = choices(mustar_minus, one[1].view(1,1), one[0].view(1,1),
-                              tP0, tQ0, tP1, tQ1, netflow, zero[1]-one[1], "cpu")
-        s_plus_star = choices(mustar_plus, zero[1].view(1,1), zero[0].view(1,1),
-                              tP0, tQ0, tP1, tQ1, netflow, zero[1]-one[1], "cpu")
-
-        mustar_minus_next, _ = xi(s_minus_star)
-        mustar_plus_next, _ = xi(s_plus_star)
-
-        flow_minus = (mustar_minus_next - mustar_minus)[0, [1,2], 3].sum() + (mustar_minus_next - mustar_minus)[0, 3, [1,2]].sum()
-        flow_plus = (mustar_plus_next - mustar_plus)[0, [1,2], 3].sum() + (mustar_plus_next - mustar_plus)[0, 3, [1,2]].sum()
-
-        lambda_minus = flow_minus / mustar_minus[0, 1:3, 1:3].sum()
-        lambda_plus = flow_plus / mustar_plus[0, 1:3, 1:3].sum()
-        lambda_plus/lambda_minus
-        # end attempt to further calibrate psi beyond log(1.1) which is theoretically correct
-
-        df.to_csv("conditional_distr.csv")
 
         fig = plot_cf_grid(df.iloc[1:,:], sex="M")
         fig.savefig("M_cf1_grid.pdf", bbox_inches="tight")
@@ -279,11 +260,14 @@ def main(train = False, noload = False, lbfgs = False,
         fig2 = plot_estimator_grid(df.iloc[1:,:], sex="F", scenario="CFF")
         fig2.savefig("star_hat_F_grid.pdf", bbox_inches="tight")
 
-        fig3 = plot_cf_grid(df2.iloc[1:,:], sex="both", dim = (4, 3))
-        fig3.savefig("joint_cf1_grid.pdf", bbox_inches="tight")
+        fig3 = plot_cf_grid(df2.iloc[1:,:], sex="both", dim = (3, 3), beyond = beyond)
+        fig3.savefig("joint1_cf1_grid.pdf", bbox_inches="tight")
 
         fig = plot_margin_counterfactuals(df1, estimator="star", scenarios=("CFF", "CF1"))
         fig.savefig("margins_CF.pdf", bbox_inches="tight")
+
+        fig = plot_cf_grid(df3.iloc[1:(-beyond),:], sex="both", dim = (1, 1), beyond = 0)
+        fig.savefig("V_cf.pdf", bbox_inches="tight")
 
         if matchingplot:
             return

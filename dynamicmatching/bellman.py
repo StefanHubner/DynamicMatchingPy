@@ -15,13 +15,13 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
     additional_outputs = [None, None, None, None, None]
     def closure():
         optim.zero_grad()
-        resid, ssh, sss, l, conds, margs = match_moments(xi,
-                                           theta,
-                                           tPs, tQs, tMuHat,
-                                           netflow, ng, dev,
-                                           tau, scale, masks, treat_idcs,
-                                           years, skiptrain=False,
-                                           cf = cf, train0 = train0)
+        resid, ssh, sss, l, conds, margs, _ = match_moments(xi,
+                                              theta,
+                                              tPs, tQs, tMuHat,
+                                              netflow, ng, dev,
+                                              tau, scale, masks, treat_idcs,
+                                              years, skiptrain=False,
+                                              cf = cf, train0 = train0)
         if calcgrad:
             resid.backward()
         additional_outputs[0] = ssh.detach().cpu()
@@ -185,11 +185,15 @@ def overallPQ(tPs, tQs, n0, n1, n2):
 
 def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
                   ng, dev, tau, scale, masks, treat_idcs, years,
-                  skiptrain = False, cf = CF.None_, train0 = True):
+                  skiptrain = False, cf = CF.None_, train0 = True, beyond = 0):
 
     beta = torch.tensor(0.95, device=dev)
     ts0 = torch.tensor(years, device=dev)
     ts = (ts0 - torch.min(ts0)) / (torch.max(ts0) - torch.min(ts0))
+    if beyond > 0:
+        ts = torch.cat((ts, ts[-1] + (ts[1] - ts[0]) * torch.arange(1, beyond + 1, device=dev)))
+
+
     print("theta: ", theta.detach().cpu().numpy())
 
     nT, nty0, nty0 = tMuHat.size()
@@ -197,7 +201,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     # regimes
     pre = range(0, treat_idcs[0])
     post = range(treat_idcs[-1] + 1, nT)
-    control_idcs = list(pre) + list(post)
+    future = range(nT, nT + beyond) if beyond > 0 else []
 
     # these won't depend on phi (leaves in the autograd graph)
     # dldTheta is gradient with respect to inner loss function
@@ -220,8 +224,8 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     def transition_mu(xi, p0, q0, p1, q1, cf):
         def step(mus, t, d):
             sst = choices(mus, t, d, p0, q0, p1, q1, netflow, ts[1] - ts[0], dev)
-            mus, _ = xi(sst)
-            return mus
+            mus, vs = xi(sst)
+            return mus, vs
         def step_household(mus): # not in use
             raise NotImplementedError()
         def step_matching(mus): # not in use
@@ -237,7 +241,6 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     # initial state
     idx0 = 0 if train0 else treat_idcs[0]
-    ss_cur = ss_hat[idx0, :].view(1, -1)
     mu_cur = tMuHat[idx0,:,:].unsqueeze(0)
 
     # we recursively define the whole path
@@ -246,21 +249,19 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     # same transition for all regimes
     walker = transition(xi, tP0, tQ0, tP1, tQ1, cf)
-    regimes = ([(pre, walker)] if train0 else []) + [(treat_idcs, walker), (post, walker)]
+    regimes = ([(pre, walker)] if train0 else []) + [(treat_idcs, walker), (post, walker)] + ([(future, walker)] if beyond > 0 else [])
 
-    ss_star = torch.zeros(nT, ss_cur.shape[1]).to(dev)
-    mu_star = torch.zeros(nT, nty0, nty0).to(dev)
+    mu_star = torch.zeros(nT+beyond, nty0, nty0).to(dev)
+    v_star = torch.zeros(nT+beyond, 1).to(dev)
 
     for (idcs, walker) in regimes:
         for i in idcs:
-           mu_star[i, :, :] = mu_cur
-           d = torch.tensor(int(i in treat_idcs), device = dev)
-           mu_cur = walker(mu_cur, ts[i].view(1,1), d.view(1,1)) # ts[i] to be safe
-           #ss_star[i, ] = ss_cur
-           #ss_cur = walker(ss_cur)
+            mu_star[i, :, :] = mu_cur
+            d = torch.tensor(int(i in treat_idcs), device = dev)
+            mu_cur, v = walker(mu_cur, ts[i].view(1,1), d.view(1,1)) # ts[i] to be safe
+            v_star[i, :] = v
 
-    #resid = torch.square(tMuHat[idx0:,:,:] - mu_star[idx0:,:,:]).sum()
-    matched = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[idx0:,:,:], masks)
+    matched = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[idx0:(-beyond),:,:], masks)
     kl_div, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star, m_hat, m_star, f_hat, f_star = matched
     print("D_KL: ", kl_div.detach().cpu().numpy())
 
@@ -268,7 +269,8 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     return (kl_div + 2.0 * loss.detach(), tMuHat, mu_star, loss,
             (cond_m_hat, cond_m_star, cond_f_hat, cond_f_star),
-            (m_hat, m_star, f_hat, f_star))
+            (m_hat, m_star, f_hat, f_star),
+            v_star)
 
 # earlier frobenius norm matching has a margin-mismatch component, which is controlled by the markov kernel
 # and entry/exit. as a result, being a square criterion it balances this over different cells.

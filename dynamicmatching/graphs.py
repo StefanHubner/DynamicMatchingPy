@@ -113,7 +113,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 
-def plot_cf_grid(df, sex):
+def plot_cf_grid(df, sex, dim = (4, 2), beyond = 0):
     cols = df.columns
     scenario_level, sex_level, est_level, state_level = range(4)
     mask = (
@@ -124,18 +124,29 @@ def plot_cf_grid(df, sex):
     state_vals = cols[mask].get_level_values(state_level)
     states = pd.Index(state_vals).unique()
     #states = {cols[i][state_level] for i in range(len(cols)) if mask[i]}
-    nrows, ncols = 4, 2
-    fig, axes = plt.subplots(nrows, ncols, figsize=(10, 12), sharex=True)
+    nrows, ncols = dim
+    fs = (10, 12) if (nrows >1 and ncols > 1) else (10, 4)
+    fig, axes = plt.subplots(nrows, ncols, figsize=fs,
+                             sharex=(nrows > 1), squeeze=False)
     axes = axes.ravel()
     idx = pd.IndexSlice
     ranges = []
     for ax, state in zip(axes, states):
         sub = df.loc[:, idx[["CFF", "CF1"], sex, "star", state]].copy()
         sub.columns = sub.columns.get_level_values(0)   # -> ["CFF", "CF1"]
-        sub.plot(ax=ax)
+        if beyond > 0:
+            cut = len(sub) - beyond
+            for i, col in enumerate(sub.columns):
+                color = f"C{i}"
+                ax.plot(sub.index[:cut], sub[col].iloc[:cut], '-', color=color, label=col)
+                ax.plot(sub.index[cut-1:], sub[col].iloc[cut-1:], '--', color=color)
+                ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
+        else:
+            sub.plot(ax=ax)
         ax.set_title(state)
         ax.set_xlabel("")
-        ax.legend_.remove()
+        if ax.legend_ is not None:
+            ax.legend_.remove()
         ymin, ymax = ax.get_ylim()
         ranges.append(ymax - ymin)
     max_range = max(ranges)
