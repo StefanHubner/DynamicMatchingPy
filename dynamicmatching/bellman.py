@@ -261,7 +261,8 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
             mu_cur, v = walker(mu_cur, ts[i].view(1,1), d.view(1,1)) # ts[i] to be safe
             v_star[i, :] = v
 
-    matched = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[idx0:(-beyond),:,:], masks)
+    star_idcs = range(idx0, nT - beyond)
+    matched = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[star_idcs,:,:], masks)
     kl_div, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star, m_hat, m_star, f_hat, f_star = matched
     print("D_KL: ", kl_div.detach().cpu().numpy())
 
