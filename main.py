@@ -1,13 +1,12 @@
 #!/usr/bin/env python
 
 import argparse
-import os
 import torch
 import pandas as pd
 import numpy as np
 import streamlit as st
 from datasets import load_dataset
-from huggingface_hub import login, hf_hub_download
+from huggingface_hub import hf_hub_download
 from copy import deepcopy
 
 from dynamicmatching import match_moments, create_closure, choices, overallPQ
@@ -26,9 +25,8 @@ st.set_page_config(page_title="Dynamic Matching")
 
 @st.cache_resource
 def load_data(name, dev):
-    token = os.environ.get("HF_TOKEN")  # HF_TOKEN is used by default
-    login(token=token, add_to_git_credential=True)
-    data = load_dataset("StefanHubner/DivorceData")[name]
+    # 2026-10-02: Reuse HF_TOKEN or the cached login without prompting again.
+    data = load_dataset("StefanHubner/DivorceData", token=True)[name]
     tPs = torch.tensor(data["p"][0], device=dev)
     tQs = torch.tensor(data["q"][0], device=dev)
     tMuHat = torch.tensor(data["couplings"][0], device=dev)
