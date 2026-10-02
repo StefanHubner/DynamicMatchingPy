@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import grad as autograd_grad
+from torch.func import functional_call
 import math
 import pdb
 import sys
@@ -13,8 +14,12 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                    ng, dev, tau, scale, masks, treat_idcs, years,
                    optim, cf, train0, calcgrad = True):
     additional_outputs = [None, None, None, None, None]
+    if calcgrad:
+        # 2026-10-02: Restore structural gradients when loading detached checkpoints.
+        theta.requires_grad_(True)
     def closure():
         optim.zero_grad()
+        xi_params = {} if calcgrad else None
         resid, ssh, sss, l, conds, margs, _ = match_moments(xi,
                                               theta,
                                               tPs, tQs, tMuHat,
@@ -22,9 +27,12 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                                               tau, scale, masks, treat_idcs,
                                               years, skiptrain=False,
                                               cf = cf, train0 = train0,
-                                              beyond = 0)
+                                              beyond = 0, xi_params = xi_params)
         if calcgrad:
-            resid.backward()
+            resid.backward(inputs=(theta,))
+            with torch.no_grad():
+                for name, param in xi.named_parameters():
+                    param.copy_(xi_params[name])
         additional_outputs[0] = ssh.detach().cpu()
         additional_outputs[1] = sss.detach().cpu()
         additional_outputs[2] = l.detach().cpu()
@@ -72,7 +80,8 @@ def choices(mus, t, d, p0, q0, p1, q1, netflow, dt, dev):
     Sincumb = torch.cat([M, F], dim=1)
     nf2 = torch.cat([netflow, netflow]).unsqueeze(dim=0)
     S0 = Sincumb + nf2 # as an absolute flow
-    S = S0 / S0.sum()
+    # 2026-10-02: Normalize each sampled economy separately after net flows.
+    S = S0 / S0.sum(dim=1, keepdim=True)
     return torch.cat([S, t + dt, d], dim = 1)
 
 def check_mass(mus, s):
@@ -83,6 +92,20 @@ def check_mass(mus, s):
     offdiag = (mus.mean(0)[0,1] + mus.mean(0)[1,0]).detach()
     print(f"{TermColours.YELLOW} {total:.2f} {TermColours.RESET}", end='')
     #print(f"{TermColours.CYAN} {offdiag:.2f} {TermColours.RESET}", end='')
+
+def matching_entropy(mus, male_margins, female_margins, scales, maskc):
+    # 2026-10-02: Share entropy with reporting while keeping Bellman margins explicit.
+    sigma_m_type, sigma_f_type = scales
+    mum_cond = mus[:, :-1, :] / male_margins.unsqueeze(2)
+    muf_cond = mus[:, :, :-1] / female_margins.unsqueeze(1)
+    log_m = masked_log(mum_cond, maskc[:-1, :])
+    log_f = masked_log(muf_cond, maskc[:, :-1])
+    H_m_by_type = (mus[:, :-1, :] * log_m).sum(dim=2)
+    H_f_by_type = (mus[:, :, :-1] * log_f).sum(dim=1)
+    entropy_c_m = (H_m_by_type * sigma_m_type).sum(dim=1)
+    entropy_c_f = (H_f_by_type * sigma_f_type).sum(dim=1)
+    return -(entropy_c_m + entropy_c_f)
+
 
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, transitions, netflow,
@@ -125,28 +148,22 @@ def residuals(ng0, xi, transitions, netflow,
     # entropym = (masked_log(mus[:,:,-1], mask0) * mus[:,:,-1]).sum(dim=1)
     # entropy = -(2 * entropyc - entropym - entropyf)
 
-    sigma_m_type, sigma_f_type = scale(theta, dev)
-    mum_cond = mus[:,:-1,:] / s[:,0:ndim].reshape((ng, ndim, 1))
-    muf_cond = mus[:,:,:-1] / s[:,ndim:(2*ndim)].reshape((ng, 1, ndim))
-    log_m = masked_log(mum_cond, maskc[:-1,:])
-    log_f = masked_log(muf_cond, maskc[:,:-1])
-    H_m_by_type = (mus[:, :-1, :] * log_m).sum(dim=2)
-    H_f_by_type = (mus[:, :, :-1] * log_f).sum(dim=1)
-    entropy_c_m = (H_m_by_type * sigma_m_type).sum(dim=1)
-    entropy_c_f = (H_f_by_type * sigma_f_type).sum(dim=1)
-    entropy = -(entropy_c_m + entropy_c_f)
+    entropy = matching_entropy(mus, s[:, :ndim], s[:, ndim:(2*ndim)],
+                               scale(theta, dev), maskc)
 
     fun = unregularised + entropy
 
     sumL = torch.sum(fun + beta * vnext)
     grads = autograd_grad(outputs=sumL, inputs=mus, create_graph=True)
-    m2 = torch.cat([torch.cat([maskc[:-1, :-1], mask0[:-1].unsqueeze(1)], dim=1),
-                    mask0.unsqueeze(0)], dim=0)
 
     margs = torch.cat([mus[:,:-1,:].sum(2), mus[:,:,:-1].sum(1)], dim=1)
 
     lambda1, lambda2, lambda3 = 1.0, 1.0, 0.0 # last part from sinkhorn
-    r1 = lambda1 * torch.square((grads[0] * m2).view(ng, -1))
+    # 2026-10-02: Eliminate current margin multipliers; retain continuation derivatives.
+    g = grads[0]
+    foc = g[:, :-1, :-1] - g[:, :-1, -1:] - g[:, -1:, :-1]
+    r1 = lambda1 * (foc * maskc[:-1, :-1]).square()
+    r1 = torch.nn.functional.pad(r1, (0, 1, 0, 1)).reshape(ng, -1)
     r2 = lambda2 * torch.square((vcur - fun - beta * vnext).view(ng, 1))
     r3 = lambda3 * torch.square(s - margs).view(ng, -1)
 
@@ -158,8 +175,23 @@ def residuals(ng0, xi, transitions, netflow,
     return mean_resid_v
 
 
+def prepare_differentiable_adam(xi, loss, optimiser, xi_params):
+    # 2026-10-02: Differentiate the final Adam update, holding earlier weights and moments fixed.
+    grads = autograd_grad(loss, tuple(xi.parameters()), create_graph=True)
+    xi_params.update({name: param.clone() for name, param in xi.named_parameters()})
+    state = optimiser.state_dict()
+    state['param_groups'][0].update(differentiable=True, foreach=False)
+    optimiser = optim.Adam(xi_params.values(), differentiable=True, foreach=False)
+    optimiser.load_state_dict(state)
+    for param, grad in zip(xi_params.values(), grads):
+        param.grad = grad
+        # 2026-10-02: Keep sqrt derivatives finite for weights with zero Adam variance.
+        optimiser.state[param]['exp_avg_sq'].clamp_min_(2 * torch.finfo(param.dtype).tiny)
+    return optimiser
+
+
 def minimise_inner(xi, theta, beta, transitions, netflow,
-                   ng, ts, tau, scale, masks, dev):
+                   ng, ts, tau, scale, masks, dev, xi_params = None):
 
     epochs = 300
     optimiser = optim.Adam(xi.parameters())  #, lr = .1) # , weight_decay = 0.01)
@@ -168,11 +200,11 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
         optimiser.zero_grad()
         loss = residuals(ng, xi, transitions, netflow,
                          beta, theta, tau, scale, masks, ts, dev)
-        loss.backward(retain_graph=True)
+        if xi_params is not None and epoch == epochs - 1:
+            optimiser = prepare_differentiable_adam(xi, loss, optimiser, xi_params)
+        else:
+            loss.backward(inputs=tuple(xi.parameters()))
         optimiser.step()
-        if epoch < epochs - 1: # detach gradients in trajectory (only keep for last)
-            for param in xi.parameters():
-                param.data = param.data.detach()
         grad_norm = check_grad_norm(optimiser)
         if epoch % (epochs // 100) == 0:
             print(f"{int((epoch/epochs) * 100)}%: {loss.item():.4f} [{grad_norm:.4f}] ",
@@ -186,7 +218,8 @@ def overallPQ(tPs, tQs, n0, n1, n2):
 
 def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
                   ng, dev, tau, scale, masks, treat_idcs, years,
-                  skiptrain = False, cf = CF.None_, train0 = True, beyond = 0):
+                  skiptrain = False, cf = CF.None_, train0 = True, beyond = 0,
+                  xi_params = None):
 
     beta = torch.tensor(0.95, device=dev)
     ts0 = torch.tensor(years, device=dev)
@@ -198,17 +231,12 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     print("theta: ", theta.detach().cpu().numpy())
 
     nT, nty0, nty0 = tMuHat.size()
+    maskc, mask0 = masks
 
     # regimes
     pre = range(0, treat_idcs[0])
     post = range(treat_idcs[-1] + 1, nT)
     future = range(nT, nT + beyond) if beyond > 0 else []
-
-    # these won't depend on phi (leaves in the autograd graph)
-    # dldTheta is gradient with respect to inner loss function
-    # emulate dl/dphi = dl/dxi * dxi/dphi + dl/dphi
-    # dl/dxi = 0 by the envelope theorem at xi = xi_opt
-    # update: now gradient graph is kept and phi is set to requires_grad
 
     transitions = overallPQ(tPs, tQs, int(train0)*len(pre),
                             len(treat_idcs), len(post))
@@ -217,24 +245,30 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     if not skiptrain:
         xi.train()
         loss = minimise_inner(xi, theta, beta, transitions, netflow,
-                              ng, ts, tau, scale, masks, dev)
+                              ng, ts, tau, scale, masks, dev, xi_params)
     else:
         loss = torch.tensor(0.0, device=dev)
 
 
-    def transition_mu(xi, p0, q0, p1, q1, cf):
-        def step(mus, t, d):
-            sst = choices(mus, t, d, p0, q0, p1, q1, netflow, ts[1] - ts[0], dev)
+    def regime_at(i):
+        # 2026-10-02: Use one scenario regime for welfare and the matching rollout.
+        flag = {CF.None_: int(i in treat_idcs),
+                CF.HighCost: 0, CF.LowCost: 1}[cf]
+        return torch.tensor([[flag]], device=dev)
+
+    def transition_mu(xi, p0, q0, p1, q1):
+        def step(mus, t, current_regime, next_regime):
+            sst = choices(mus, t, current_regime, p0, q0, p1, q1,
+                          netflow, ts[1] - ts[0], dev)
+            # 2026-10-02: Evaluate next year's matching under next year's regime.
+            sst = torch.cat([sst[:, :-1], next_regime], dim=1)
             mus, vs = xi(sst)
             return mus, vs
         def step_household(mus): # not in use
             raise NotImplementedError()
         def step_matching(mus): # not in use
             raise NotImplementedError()
-        return {CF.None_: step,
-                CF.HighCost: lambda mus, t, d: step(mus, t, torch.zeros_like(d)),
-                CF.LowCost: lambda mus, t, d: step(mus, t, torch.ones_like(d))
-                }[cf]
+        return step
 
     tM = tMuHat[:,:-1,:].sum(2)
     tF = tMuHat[:,:,:-1].sum(1)
@@ -249,7 +283,8 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     transition = transition_mu
 
     # same transition for all regimes
-    walker = transition(xi, tP0, tQ0, tP1, tQ1, cf)
+    xi_eval = xi if xi_params is None else lambda s: functional_call(xi, xi_params, (s,))
+    walker = transition(xi_eval, tP0, tQ0, tP1, tQ1)
     regimes = ([(pre, walker)] if train0 else []) + [(treat_idcs, walker), (post, walker)] + ([(future, walker)] if beyond > 0 else [])
 
     mu_star = torch.zeros(nT+beyond, nty0, nty0).to(dev)
@@ -258,18 +293,27 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     for (idcs, walker) in regimes:
         for i in idcs:
             mu_star[i, :, :] = mu_cur
-            d = torch.tensor(int(i in treat_idcs), device = dev)
-            mu_cur, v = walker(mu_cur, ts[i].view(1,1), d.view(1,1)) # ts[i] to be safe
-            v_star[i, :] = v
+            current_regime = regime_at(i)
+            next_regime = regime_at(i + 1)
+            unreg = (mu_cur * tau(theta, ts[i].view(1,1), current_regime, dev)).sum()
+            vdir = unreg + matching_entropy(
+                mu_cur, mu_cur[:, :-1, :].sum(2), mu_cur[:, :, :-1].sum(1),
+                scale(theta, dev), maskc).sum()
+            mu_cur, v = walker(mu_cur, ts[i].view(1,1), current_regime, next_regime)
+            v_star[i, :] = vdir # vs v (approximate value fct)
 
     star_idcs = range(idx0, len(mu_star) - beyond)
-    matched = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[star_idcs,:,:], masks)
+    if beyond == 0:
+        matched = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[star_idcs,:,:], masks)
+    else:
+        # 2026-10-02: Duplicate model outputs into hat for extended-plot alignment, not data-fit validation.
+        matched = conditional_kl_loss(mu_star[idx0:,:,:], mu_star[idx0:,:,:], masks)
     kl_div, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star, m_hat, m_star, f_hat, f_star = matched
     print("D_KL: ", kl_div.detach().cpu().numpy())
 
     torch.cuda.empty_cache()
 
-    return (kl_div + 2.0 * loss.detach(), tMuHat, mu_star, loss,
+    return (kl_div + 2.0 * (loss.detach() if xi_params is None else loss), tMuHat, mu_star, loss,
             (cond_m_hat, cond_m_star, cond_f_hat, cond_f_star),
             (m_hat, m_star, f_hat, f_star),
             v_star)

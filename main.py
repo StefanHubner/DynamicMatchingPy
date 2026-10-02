@@ -49,7 +49,7 @@ def main(train = False, noload = False, lbfgs = False,
          neldermead = False, matchingplot = False):
 
     torch.set_printoptions(precision=4, sci_mode=False)
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and not matchingplot:
         dev = "cuda"
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
@@ -81,7 +81,13 @@ def main(train = False, noload = False, lbfgs = False,
                 ("MS", 3, masksMS, tauMScal, scale1(3), 5, None,
                  range(1999, 2021), False),
               "MScal":
-                ("MS", 3, masksMS, tauMScal, scaleMScal, 5+3, None,
+                # 2026-10-02: One fixed reference scale leaves two estimated type scales.
+                ("MS", 3, masksMS, tauMScal, scaleMScal, 5+2, None,
+                 range(1999, 2021), False),
+              "MScalold":
+                # 2026-10-02: Retain the legacy eight-parameter model with three free scales.
+                ("MS", 3, masksMS, tauMScal,
+                 lambda par, dev: tpl(torch.exp(par[5:])), 5+3, None,
                  range(1999, 2021), False),
               "MScaltrend":
                 ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2,
@@ -112,7 +118,9 @@ def main(train = False, noload = False, lbfgs = False,
         repo = "StefanHubner/DutchDivorce"
         f = lambda n: hf_hub_download(
             repo_id = repo,
-            filename = n + current + ".pt",
+            filename = n + ("MScal" if current == "MScalold" else current) + ".pt",
+            # 2026-10-02: Pin legacy files so future MScal checkpoints cannot replace them.
+            revision = "ba7727a7e639833895967f9fa4241b385bbcde91" if current == "MScalold" else None,
             cache_dir = ".hfcache"
         )
         theta = torch.load(f("theta"),
@@ -151,6 +159,17 @@ def main(train = False, noload = False, lbfgs = False,
                                               ng, dev, tau, scale, masks,
                                               treat_idcs, years, optim,
                                               CF.None_, train0, not neldermead)
+        best_evaluation = None
+        # 2026-10-02: Snapshot each evaluated pair before the outer optimizer changes theta or xi.
+        def tracked_closure():
+            nonlocal best_evaluation
+            loss = closure()
+            value = loss.detach().item()
+            if value < (best_evaluation[0] if best_evaluation else float("inf")):
+                best_evaluation = (value, theta.detach().clone(),
+                                   deepcopy(xi), deepcopy(add_outputs))
+            return loss
+        step_closure = tracked_closure
         torch.set_printoptions(precision = 5, sci_mode=False)
 
         columns = ['loss', 'l'] + [f'theta{i}' for i in range(thetadim)]
@@ -159,16 +178,17 @@ def main(train = False, noload = False, lbfgs = False,
 
         hfpath = "./hfdd/"
         for epoch in range(1, num_epochs + 1):
-            loss = optim.step(closure)
-            curloss = loss.cpu().detach().clone().item()
-            mush, muss, l, conds, margs = add_outputs
+            loss = optim.step(step_closure)
+            curloss, eval_theta, eval_xi, outputs = best_evaluation or (
+                loss.cpu().detach().clone().item(), theta, xi, add_outputs)
+            mush, muss, l, conds, margs = outputs
             cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
-            par = theta.cpu().detach().numpy().flatten()
+            par = eval_theta.cpu().detach().numpy().flatten()
             print(f"theta_t: {TermColours.CYAN}{par}{TermColours.RESET}")
             if curloss < losshat:
                 losshat = deepcopy(curloss)  # force value assignment
-                thetahat = theta.detach().clone()
-                xihat = deepcopy(xi)
+                thetahat = eval_theta.detach().clone()
+                xihat = eval_xi if best_evaluation is not None else deepcopy(eval_xi)
                 print("Saving tensors")
                 torch.save(thetahat, hfpath + "theta" + current + ".pt")
                 torch.save(xihat.state_dict(),
@@ -221,10 +241,10 @@ def main(train = False, noload = False, lbfgs = False,
         vrs   = [("U|U",   (0,0)), ("0|U",  (0,3)),
                 ("CH|CH", (1,1)), ("CW|CH", (1,2)), ("0|CH", (1,3)),
                 ("CH|CW", (2,1)), ("CW|CW", (2,2)), ("0|CW", (2,3))]
-        joint_vars = [("U,U",   (0,0)), ("U,0",  (0,3)),
-                      ("CH,CH", (1,1)), #("CH,CW", (1,2)), ("CH,0", (1,3)),
-                      ("CW,CH", (2,1)), ("CW,CW", (2,2)), ("CW,0", (2,3)),
-                      ("0,U",   (3,0)), ("0,CH", (3,1)), ("0,CW", (3,2))]
+        joint_vars = [("Cohabiting",   (0,0)), ("Single Men",  (0,3)),
+                      ("Both Home Production", (1,1)), #("CH,CW", (1,2)), ("CH,0", (1,3)),
+                      ("Male Breadwinner", (2,1)), ("Both Market Work", (2,2)), ("Divorced Men (Market Work)", (2,3)),
+                      ("Single Women",   (3,0)), ("Divorced Women (Home Production)", (3,1)), ("Divorced Women (Market Work)", (3,2))]
         for n, cf in zip(["CFF", "CF0", "CF1"], [CF.None_, CF.HighCost, CF.LowCost]):
             _, mu_stars[cf], condss[cf], margss[cf], vs[cf] = load_mus(xi, theta, tPs, tQs, 
                                                   mu_hat, netflow, ng,
@@ -234,28 +254,34 @@ def main(train = False, noload = False, lbfgs = False,
                 for (cond, (i, j)) in vrs:
                     df[(n, s, e, cond)] = t[:, i, j].detach().numpy()
             for ((s, e), t) in zip(condss_names, margss[cf]):
-                for (mg, i) in zip(["U", "CH", "CW"], [0, 1, 2]):
+                for (mg, i) in zip(["Unmarried", "Home Production", "Market Work"], [0, 1, 2]):
                     df1[(n, s, e, mg)] = t[:, i].flatten().detach().numpy()
             for ((s, e), t) in zip(condss_names, mu_stars[cf]):
                 for (jnt, (i, j)) in joint_vars:
                     df2[(n, "both", "star", jnt)] = mu_stars[cf][(0 if train0 else 2):, i, j].detach().numpy()
-            df3[(n, "both", "star", "V")] = vs[cf][(0 if train0 else 2):, 0].detach().numpy() 
+            df3[(n, "both", "star", "Welfare")] = vs[cf][(0 if train0 else 2):, 0].detach().numpy() 
 
-        xax = range(years.start, years.stop+beyond)
-        lyears = [f"{l}" for l in np.array(list(xax))[pre if train0 else [] + treat_idcs + list(post) + list(range(post.stop, post.stop+beyond))].tolist()]
-        df.columns = pd.MultiIndex.from_tuples(df.columns, names=["scenario", "sex", "estimator", "state"])
-        df.index = [f"{l}" for l in np.array(list(xax))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
-        df1.columns = pd.MultiIndex.from_tuples(df1.columns, names=["scenario", "sex", "estimator", "state"])
-        df1.index = [f"{l}" for l in np.array(list(xax))[pre if train0 else [] + treat_idcs + list(post)].tolist()]
-        df2.columns = pd.MultiIndex.from_tuples(df2.columns, names=["scenario", "sex", "estimator", "state"])
-        df2.index = lyears
-        df3.columns = pd.MultiIndex.from_tuples(df3.columns, names=["scenario", "sex", "estimator", "state"])
-        df3.index = lyears
+        col_names = ["scenario", "sex", "estimator", "state"]
 
+        all_years = list(range(years.start, years.stop + beyond))
+        base_pos = (list(pre) if train0 else []) + list(treat_idcs) + list(post)
+        full_pos = base_pos + list(range(post.stop, post.stop + beyond))
 
-        fig = plot_cf_grid(df.iloc[1:,:], sex="M")
+        base_labels = [str(all_years[i]) for i in base_pos]
+        full_labels = [str(all_years[i]) for i in full_pos]
+
+        for frame, labels in (
+            (df,  full_labels),
+            (df1, full_labels),
+            (df2, full_labels),
+            (df3, full_labels),
+        ):
+            frame.columns = pd.MultiIndex.from_tuples(frame.columns, names=col_names)
+            frame.index = labels
+
+        fig, _ = plot_cf_grid(df.iloc[1:,:], sex="M")
         fig.savefig("M_cf1_grid.pdf", bbox_inches="tight")
-        fig = plot_cf_grid(df.iloc[1:,:], sex="F")
+        fig, _ = plot_cf_grid(df.iloc[1:,:], sex="F")
         fig.savefig("F_cf1_grid.pdf", bbox_inches="tight")
 
         fig2 = plot_estimator_grid(df.iloc[1:,:], sex="M", scenario="CFF")
@@ -263,14 +289,17 @@ def main(train = False, noload = False, lbfgs = False,
         fig2 = plot_estimator_grid(df.iloc[1:,:], sex="F", scenario="CFF")
         fig2.savefig("star_hat_F_grid.pdf", bbox_inches="tight")
 
-        fig3 = plot_cf_grid(df2.iloc[1:,:], sex="both", dim = (3, 3), beyond = beyond)
+        fig3, d = plot_cf_grid(df2.iloc[1:,:], sex="both", dim = (3, 3), beyond = beyond)
         fig3.savefig("joint1_cf1_grid.pdf", bbox_inches="tight")
+        d.to_csv("joint1_cf1_grid.csv")
 
-        fig = plot_margin_counterfactuals(df1, estimator="star", scenarios=("CFF", "CF1"))
+        fig, d = plot_margin_counterfactuals(df1, estimator="star", scenarios=("CFF", "CF1"), beyond = beyond)
         fig.savefig("margins_CF.pdf", bbox_inches="tight")
+        d.to_csv("margins_CF.csv")
 
-        fig = plot_cf_grid(df3.iloc[1:(-beyond),:], sex="both", dim = (1, 1), beyond = 0)
+        fig, d = plot_cf_grid(df3, sex="both", dim = (1, 1), beyond = beyond)
         fig.savefig("V_cf.pdf", bbox_inches="tight")
+        d.to_csv("V_cf.csv")
 
         if matchingplot:
             return

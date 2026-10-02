@@ -3,6 +3,7 @@ import numpy as np
 import torch 
 import seaborn as sns
 import base64
+import pandas as pd
 
 def matched_process_plot(ss_hat, ss_star):
     colors = ['b', 'g', 'r', 'c', 'm']
@@ -109,11 +110,7 @@ def svg_to_data_url(svg_string):
     b64 = base64.b64encode(svg_string.encode('utf-8')).decode('utf-8')
     return f'data:image/svg+xml;base64,{b64}'
 
-import matplotlib
-import matplotlib.pyplot as plt
-import pandas as pd
-
-def plot_cf_grid(df, sex, dim = (4, 2), beyond = 0):
+def plot_cf_grid(df, sex, dim=(4, 2), beyond=0, treatcut=7, pymin=0):
     cols = df.columns
     scenario_level, sex_level, est_level, state_level = range(4)
     mask = (
@@ -123,41 +120,51 @@ def plot_cf_grid(df, sex, dim = (4, 2), beyond = 0):
     )
     state_vals = cols[mask].get_level_values(state_level)
     states = pd.Index(state_vals).unique()
-    #states = {cols[i][state_level] for i in range(len(cols)) if mask[i]}
+
     nrows, ncols = dim
-    fs = (10, 12) if (nrows >1 and ncols > 1) else (10, 4)
+    fs = (10, 12) if (nrows > 1 and ncols > 1) else (10, 4)
     fig, axes = plt.subplots(nrows, ncols, figsize=fs,
                              sharex=(nrows > 1), squeeze=False)
     axes = axes.ravel()
     idx = pd.IndexSlice
-    ranges = []
+
+    ymaxs = []
+
     for ax, state in zip(axes, states):
         sub = df.loc[:, idx[["CFF", "CF1"], sex, "star", state]].copy()
-        sub.columns = sub.columns.get_level_values(0)   # -> ["CFF", "CF1"]
+        sub.columns = sub.columns.get_level_values(0)
+        colours = ['#C44E52', '#55A868']
+        width = [2, 2]
+
         if beyond > 0:
             cut = len(sub) - beyond
             for i, col in enumerate(sub.columns):
-                color = f"C{i}"
-                ax.plot(sub.index[:cut], sub[col].iloc[:cut], '-', color=color, label=col)
-                ax.plot(sub.index[cut-1:], sub[col].iloc[cut-1:], '--', color=color)
-                ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
+                color = colours[i]
+                ax.plot(sub.index[:treatcut], sub[col].iloc[:treatcut], '-', color=color, linewidth=width[i], label=col)
+                ax.plot(sub.index[treatcut-1:cut], sub[col].iloc[treatcut-1:cut], '-', color=color, linewidth=2, label=col)
+                ax.plot(sub.index[cut-1:], sub[col].iloc[cut-1:], '--', color=color, linewidth=2)
+            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
         else:
-            sub.plot(ax=ax)
+            sub.plot(ax=ax, color=colours)
+
         ax.set_title(state)
         ax.set_xlabel("")
         if ax.legend_ is not None:
             ax.legend_.remove()
-        ymin, ymax = ax.get_ylim()
-        ranges.append(ymax - ymin)
-    max_range = max(ranges)
+
+        _, ymax = ax.get_ylim()
+        ymaxs.append(ymax)
+
+    common_ymax = max(ymaxs)
+
     for ax in axes[:len(states)]:
-        ymin, ymax = ax.get_ylim()
-        mid = (ymin + ymax) / 2
-        ax.set_ylim(mid - max_range / 2, mid + max_range / 2)
+        ax.set_ylim(pymin, common_ymax)
+
     for k in range(len(states), len(axes)):
         axes[k].set_visible(False)
+
     fig.tight_layout()
-    return fig
+    return fig, df.loc[:, idx[["CFF", "CF1"], sex, "star", states]]
 
 def plot_estimator_grid(df: pd.DataFrame, sex: str = "M",
                         scenario: str = "CFF",
@@ -196,28 +203,53 @@ def plot_estimator_grid(df: pd.DataFrame, sex: str = "M",
 
 def plot_margin_counterfactuals(df: pd.DataFrame,
                                 estimator: str = "star",
-                                scenarios = ("CF0", "CF1")):
+                                scenarios=("CF0", "CF1"),
+                                beyond: int = 0,
+                                treatcut: int = 7):
     idx = pd.IndexSlice
-    sexes  = ["M", "F"]
-    states = ["U", "CH", "CW"]
+    sexes = ["Male", "Female"]
+    shorts = {"Male": "M", "Female": "F"}
+    states = ["Unmarried", "Home Production", "Market Work"]
+
     fig, axes = plt.subplots(2, 3, figsize=(12, 6), sharex=True)
     axes = axes.reshape(2, 3)
+
+    colours = ['#C44E52', '#55A868']
+    widths = [2, 2]
+    ymaxs = []
+
     for i, sex in enumerate(sexes):
         for j, state in enumerate(states):
             ax = axes[i, j]
-            sub = df.loc[:, idx[list(scenarios), sex, estimator, state]].copy()
+            sub = df.loc[:, idx[list(scenarios), shorts[sex], estimator, state]].copy()
             sub.columns = sub.columns.get_level_values(0)
-            sub.plot(ax=ax)
+
+            if beyond > 0:
+                cut = len(sub) - beyond
+                for k, col in enumerate(sub.columns):
+                    color = colours[k]
+                    ax.plot(sub.index[:treatcut], sub[col].iloc[:treatcut],
+                            '-', color=color, linewidth=widths[k], label=col)
+                    ax.plot(sub.index[treatcut-1:cut], sub[col].iloc[treatcut-1:cut],
+                            '-', color=color, linewidth=widths[k], label=col)
+                    ax.plot(sub.index[cut-1:], sub[col].iloc[cut-1:],
+                            '--', color=color, linewidth=widths[k])
+                ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
+            else:
+                sub.plot(ax=ax, color=colours)
+
             ax.set_title(f"{sex}, {state}")
             ax.set_xlabel("")
             if ax.legend_ is not None:
                 ax.legend_.remove()
-    # equalise y-scale across all panels
-    all_axes = axes.ravel()
-    max_range = max(ax.get_ylim()[1] - ax.get_ylim()[0] for ax in all_axes)
-    for ax in all_axes:
-        ymin, ymax = ax.get_ylim()
-        mid = (ymin + ymax) / 2
-        ax.set_ylim(mid - max_range / 2, mid + max_range / 2)
+
+            _, ymax = ax.get_ylim()
+            ymaxs.append(ymax)
+
+    common_ymax = max(ymaxs)
+
+    for ax in axes.ravel():
+        ax.set_ylim(0, common_ymax)
+
     fig.tight_layout()
-    return fig
+    return fig, df.loc[:, idx[list(scenarios), ["M", "F"], estimator, states]]
