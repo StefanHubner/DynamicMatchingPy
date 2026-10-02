@@ -176,13 +176,15 @@ def main(train = False, noload = False, lbfgs = False,
 
         hfpath = "./hfdd/"
         for epoch in range(1, num_epochs + 1):
+            # 2026-10-02: Compare this step's evaluated pair with the separately saved best.
+            best_evaluation = None
             loss = optim.step(step_closure)
             curloss, eval_theta, eval_xi, outputs = best_evaluation or (
                 loss.cpu().detach().clone().item(), theta, xi, add_outputs)
             mush, muss, l, conds, margs = outputs
             cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
             par = eval_theta.cpu().detach().numpy().flatten()
-            print(f"theta_t: {TermColours.CYAN}{par}{TermColours.RESET}")
+            print(f"theta_t (best trial this step): {TermColours.CYAN}{par}{TermColours.RESET}")
             if curloss < losshat:
                 losshat = deepcopy(curloss)  # force value assignment
                 thetahat = eval_theta.detach().clone()
@@ -192,12 +194,12 @@ def main(train = False, noload = False, lbfgs = False,
                 torch.save(xihat.state_dict(),
                            hfpath + "xi" + current + ".pt")
             else:
-                print("previous loss: {} < loss: {}".format(losshat, curloss))
+                print("No improvement: step loss {}, best loss {}".format(curloss, losshat))
 
             perc = int((epoch / num_epochs) * 100)
             diffs = 0.5 * (cond_m_star - cond_f_hat) + 0.5 * (cond_f_star - cond_m_hat)
-            print(f"{TermColours.BRIGHT_RED}{perc}% : {losshat:.4f} : \
-                    {thetahat}: \r\n \
+            print(f"{TermColours.BRIGHT_RED}{perc}% : best loss {losshat:.4f} : \
+                    best theta {thetahat}: \r\n \
                     {TermColours.GREEN}{diffs} \
                     {TermColours.RESET}",
                   end='\t', flush=True)

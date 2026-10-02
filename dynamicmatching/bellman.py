@@ -309,11 +309,13 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
         # 2026-10-02: Duplicate model outputs into hat for extended-plot alignment, not data-fit validation.
         matched = conditional_kl_loss(mu_star[idx0:,:,:], mu_star[idx0:,:,:], masks)
     kl_div, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star, m_hat, m_star, f_hat, f_star = matched
-    print("D_KL: ", kl_div.detach().cpu().numpy())
+    # 2026-10-02: Report the KL, inner residual and total from the same evaluation.
+    total_loss = kl_div + 2.0 * (loss.detach() if xi_params is None else loss)
+    print("D_KL: ", kl_div.item(), " inner loss: ", loss.item(), " total loss: ", total_loss.item())
 
     torch.cuda.empty_cache()
 
-    return (kl_div + 2.0 * (loss.detach() if xi_params is None else loss), tMuHat, mu_star, loss,
+    return (total_loss, tMuHat, mu_star, loss,
             (cond_m_hat, cond_m_star, cond_f_hat, cond_f_star),
             (m_hat, m_star, f_hat, f_star),
             v_star)
