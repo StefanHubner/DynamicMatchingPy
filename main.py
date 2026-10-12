@@ -9,12 +9,14 @@ from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 from copy import deepcopy
 
-from dynamicmatching import match_moments, create_closure, choices, overallPQ
+from dynamicmatching import create_closure, overallPQ
 from dynamicmatching import tauMcal, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
 from dynamicmatching import scaleMcal, scaleMScal, scaleMScaltrend, tauMScaltrend
-from dynamicmatching import matched_process_plot, create_heatmap, plot_cf_grid, plot_estimator_grid, plot_margin_counterfactuals
+from dynamicmatching import matched_process_plot, plot_cf_grid, plot_estimator_grid, plot_margin_counterfactuals
 from dynamicmatching import SinkhornGeneric
 from dynamicmatching import NelderMeadOptimizer
+from dynamicmatching.reporting import load_mus, prepare_plot_frames, save_plot
+from dynamicmatching.reporting import sandbox_controls, show_sandbox, show_raw_matches
 
 
 st.set_page_config(page_title="Dynamic Matching")
@@ -33,15 +35,6 @@ def load_data(name, dev):
     ee = torch.tensor(data["entryexit"][0], device=dev)
     return tPs, tQs, tMuHat, ee
 
-
-def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
-             scale, masks, tis, years, cf, train0, beyond):
-    _, muh1, mus, _, conds, margs, vs = match_moments(xi, theta,
-                                        tPs, tQs, muh, netflow, ng,
-                                        dev, tau, scale, masks, tis, years,
-                                        skiptrain = True, cf = cf,
-                                        train0 = train0, beyond = beyond)
-    return muh1, mus, conds, margs, vs
 
 def main(train = False, noload = False, lbfgs = False,
          neldermead = False, matchingplot = False):
@@ -218,305 +211,64 @@ def main(train = False, noload = False, lbfgs = False,
         xi.eval()
         theta = thetahat.cpu()
         tPs, tQs = tPs.cpu(), tQs.cpu()
-        pre = range(0, treat_idcs[0])
-        post = range(treat_idcs[-1] + 1, len(tMuHat))
-        transitions = overallPQ(tPs, tQs, int(train0)*len(pre),
-                                len(treat_idcs), len(post))
-        tP, tQ, tP0, tQ0, tP1, tQ1 = transitions
         mu_hat = tMuHat.cpu()
-        sandbox, process, raw, net = st.tabs(["Sandbox",
-                                              "Matched Processes",
-                                              "Raw",
-                                              "Network"])
 
+        # 2026-10-12: Keep the reporting workflow here; preparation and display details live in reporting.py.
         beyond = 20
-        mu_stars  = {}
-        condss = {}
-        margss = {}
-        vs = {}
-        df = pd.DataFrame()
-        df1 = pd.DataFrame()
-        df2 = pd.DataFrame()
-        df3 = pd.DataFrame()
-        condss_names = [("M", "hat"), ("M", "star"), ("F", "hat"), ("F", "star")]
-        vrs   = [("U|U",   (0,0)), ("0|U",  (0,3)),
-                ("CH|CH", (1,1)), ("CW|CH", (1,2)), ("0|CH", (1,3)),
-                ("CH|CW", (2,1)), ("CW|CW", (2,2)), ("0|CW", (2,3))]
-        joint_vars = [("Cohabiting",   (0,0)), ("Single Men",  (0,3)),
-                      ("Both Home Production", (1,1)), #("CH,CW", (1,2)), ("CH,0", (1,3)),
-                      ("Male Breadwinner", (2,1)), ("Both Market Work", (2,2)), ("Divorced Men (Market Work)", (2,3)),
-                      ("Single Women",   (3,0)), ("Divorced Women (Home Production)", (3,1)), ("Divorced Women (Market Work)", (3,2))]
-        for n, cf in zip(["CFF", "CF0", "CF1"], [CF.None_, CF.HighCost, CF.LowCost]):
-            _, mu_stars[cf], condss[cf], margss[cf], vs[cf] = load_mus(xi, theta, tPs, tQs, 
-                                                  mu_hat, netflow, ng,
-                                                 "cpu", tau, scale, masks, treat_idcs, years,
-                                                  cf = cf, train0 = train0, beyond = beyond)
-            for ((s, e), t) in zip(condss_names, condss[cf]):
-                for (cond, (i, j)) in vrs:
-                    df[(n, s, e, cond)] = t[:, i, j].detach().numpy()
-            for ((s, e), t) in zip(condss_names, margss[cf]):
-                for (mg, i) in zip(["Unmarried", "Home Production", "Market Work"], [0, 1, 2]):
-                    df1[(n, s, e, mg)] = t[:, i].flatten().detach().numpy()
-            for ((s, e), t) in zip(condss_names, mu_stars[cf]):
-                for (jnt, (i, j)) in joint_vars:
-                    df2[(n, "both", "star", jnt)] = mu_stars[cf][(0 if train0 else 2):, i, j].detach().numpy()
-            df3[(n, "both", "star", "Welfare")] = vs[cf][(0 if train0 else 2):, 0].detach().numpy() 
+        scenarios = {"CFF": CF.None_, "CF0": CF.HighCost, "CF1": CF.LowCost}
+        results = {}
+        for name, cf in scenarios.items():
+            results[name] = load_mus(xi, theta, tPs, tQs, mu_hat, netflow,
+                                     ng, "cpu", tau, scale, masks,
+                                     treat_idcs, years, cf, train0, beyond)
 
-        col_names = ["scenario", "sex", "estimator", "state"]
+        frames = prepare_plot_frames(results, years, treat_idcs, train0, beyond)
+        conditional = frames["conditional"].iloc[1:, :]
+        for sex in ("M", "F"):
+            save_plot(plot_cf_grid, conditional, f"{sex}_cf1_grid.pdf", sex=sex)
+            save_plot(plot_estimator_grid, conditional, f"star_hat_{sex}_grid.pdf",
+                      sex=sex, scenario="CFF")
 
-        all_years = list(range(years.start, years.stop + beyond))
-        base_pos = (list(pre) if train0 else []) + list(treat_idcs) + list(post)
-        full_pos = base_pos + list(range(post.stop, post.stop + beyond))
-
-        base_labels = [str(all_years[i]) for i in base_pos]
-        full_labels = [str(all_years[i]) for i in full_pos]
-
-        for frame, labels in (
-            (df,  full_labels),
-            (df1, full_labels),
-            (df2, full_labels),
-            (df3, full_labels),
-        ):
-            frame.columns = pd.MultiIndex.from_tuples(frame.columns, names=col_names)
-            frame.index = labels
-
-        fig, _ = plot_cf_grid(df.iloc[1:,:], sex="M")
-        fig.savefig("M_cf1_grid.pdf", bbox_inches="tight")
-        fig, _ = plot_cf_grid(df.iloc[1:,:], sex="F")
-        fig.savefig("F_cf1_grid.pdf", bbox_inches="tight")
-
-        fig2 = plot_estimator_grid(df.iloc[1:,:], sex="M", scenario="CFF")
-        fig2.savefig("star_hat_M_grid.pdf", bbox_inches="tight")
-        fig2 = plot_estimator_grid(df.iloc[1:,:], sex="F", scenario="CFF")
-        fig2.savefig("star_hat_F_grid.pdf", bbox_inches="tight")
-
-        fig3, d = plot_cf_grid(df2.iloc[1:,:], sex="both", dim = (3, 3), beyond = beyond)
-        fig3.savefig("joint1_cf1_grid.pdf", bbox_inches="tight")
-        d.to_csv("joint1_cf1_grid.csv")
-
-        fig, d = plot_margin_counterfactuals(df1, estimator="star", scenarios=("CFF", "CF1"), beyond = beyond)
-        fig.savefig("margins_CF.pdf", bbox_inches="tight")
-        d.to_csv("margins_CF.csv")
-
-        fig, d = plot_cf_grid(df3, sex="both", dim = (1, 1), beyond = beyond)
-        fig.savefig("V_cf.pdf", bbox_inches="tight")
-        d.to_csv("V_cf.csv")
+        save_plot(plot_cf_grid, frames["joint"].iloc[1:, :], "joint1_cf1_grid.pdf",
+                  csv=True, sex="both", dim=(3, 3), beyond=beyond,
+                  forecast_start=years.stop)
+        save_plot(plot_margin_counterfactuals, frames["marginal"], "margins_CF.pdf",
+                  csv=True, estimator="star", scenarios=("CFF", "CF1"),
+                  beyond=beyond, forecast_start=years.stop)
+        save_plot(plot_cf_grid, frames["welfare"], "V_cf.pdf",
+                  csv=True, sex="both", dim=(1, 1), beyond=beyond,
+                  forecast_start=years.stop)
 
         if matchingplot:
             return
 
-        mu_star = mu_stars[CF.None_]
-        cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = condss[CF.None_]
-
-
-        s = st.session_state
-        if 'currentyear' not in s: s.currentyear = years[0]
-        if 't' not in s: s.t = torch.tensor(0.0).view(1,1)
+        pre = range(0, treat_idcs[0])
+        post = range(treat_idcs[-1] + 1, len(mu_hat))
+        transitions = overallPQ(tPs, tQs, int(train0)*len(pre),
+                                len(treat_idcs), len(post))
         dt = 1.0 / (years[-1] - years[0])
-        def update_year():
-            s.t = torch.tensor((s.currentyear - years[0]) * dt).view(1,1)
+        controls = sandbox_controls(vars, years)
+        mu_star = results["CFF"][1]
+        sandbox, process, raw = st.tabs(["Sandbox", "Matched Processes", "Raw"])
 
-        year = st.sidebar.slider('Year', years[0], years[-1], step=1,
-                                  key='currentyear', on_change=update_year)
-
-        if 'mu' not in s: s.mu = 0.25
-        if 'vu' not in s: s.vu = 0.25
-
-        def update_c():
-            s.mc = 0.5 - s.mu
-            s.vc = 0.5 - s.vu
-
-        mu = st.sidebar.slider('$M_{u}$', 0.0, 0.5, step=0.01,
-                               key='mu', on_change=update_c)
-        vu = st.sidebar.slider('$F_{u}$', 0.0, 0.5, step=0.01,
-                               key='vu', on_change=update_c)
-        update_c()
-
-        if vars == "M":
-            ss = lambda d: torch.tensor([[s.mu, s.mc, s.vu, s.vc, s.t, d]],
-                                        device="cpu")
-            hdmu = ['u', 'c', '0']
-            hds = ['M_u', 'M_c', 'F_u', 'F_c', 't', 'd']
-            cells = {"uu": (0,0), "cc": (1,1), "u0": (0,2), "0u": (2,0),
-                     "c0": (1,2), "0c": (2,1)}
-            couples = ["uu", "cc"]
-            singles = ["u0", "0u", "c0", "0c"]
-
-
-        if vars == "MS":
-            if 'myu' not in s: s.myu = 0.5
-            if 'mhc' not in s: s.mhc = 0.5
-            if 'vyu' not in s: s.vyu = 0.5
-            if 'vhc' not in s: s.vhc = 0.5
-
-            def update_ou():
-                s.mou = 1 - s.myu
-                s.fou = 1 - s.vyu
-            def update_wc():
-                s.mwc = 1 - s.mhc
-                s.fwc = 1 - s.vhc
-
-            st.sidebar.slider('$M_{y|u}$', 0.0, 1.0, step=0.01,
-                              key='myu', on_change=update_ou)
-            update_ou()
-            st.sidebar.slider('$M_{h|c}$', 0.0, 1.0, step=0.01,
-                              key='mhc', on_change=update_wc)
-            update_wc()
-
-            update_c()
-            st.sidebar.slider('$F_{y|u}$', 0.0, 1.0, step=0.01,
-                              key='vyu', on_change=update_ou)
-            update_ou()
-            st.sidebar.slider('$F_{h|c}$', 0.0, 1.0, step=0.01,
-                              key='vhc', on_change=update_wc)
-            update_wc()
-
-            ss = lambda d: torch.tensor([[
-                               s.mu * s.myu, s.mu * (1 - s.myu),
-                               s.mc * s.mhc, s.mc * (1 - s.mhc),
-                               s.vu * s.vyu, s.vu * (1 - s.vyu),
-                               s.vc * s.vhc, s.vc * (1 - s.vhc),
-                               s.t, d]], device="cpu")
-
-            hdmu = ['uy', 'uo', 'ch', 'cw', '0']
-            hds = ['M_{uy}', 'M_{uo}', 'M_{ch}', 'M_{cw}',
-                   'F_{uy}', 'F_{uu}', 'F_{ch}', 'F_{cw}', 't', 'd']
-
-            cells = {"uyuy": (0,0), "uouo": (1,1),
-                     "chch": (2,2), "cwcw": (3,3),
-                     "uouy": (1,0), "cwch": (3,2),
-                     "uy0": (0,4), "0uy": (4,0),
-                     "uo0": (1,4), "0uo": (4,1),
-                     "ch0": (2,4), "0ch": (4,2),
-                     "cw0": (3,4), "0cw": (4,3)}
-
-            couples = ["uyuy", "uouo", "uouy", "chch", "cwcw", "cwch"]
-            singles = ["uy0", "0uy", "uo0", "0uo", "ch0", "0ch", "cw0", "0cw"]
-
-        if vars == "KMS":
-            hdmu = ['vuy', 'vuo', 'vcy', 'vco',
-                    'kuh', 'kuw', 'kch', 'kcw', '0']
-            hds = ['M_{vuy}', 'M_{vuo}', 'M_{vcy}', 'M_{vco}',
-                   'M_{kuh}', 'M_{kuw}', 'M_{kch}', 'M_{kcw}',
-                   'F_{vuy}', 'F_{vuo}', 'F_{vcy}', 'F_{vco}',
-                   'F_{kuh}', 'F_{kuw}', 'F_{kch}', 'F_{kcw}',
-                   't', 'd']
-
-            cells = {"vuyvuy": (0,0), "vuovuo": (1,1),
-                     "vchvch": (2,2), "vcwvcw": (3,3),
-                     "kuykuy": (4,4), "kuokuo": (5,5),
-                     "kuokuy": (5,4), "kchkch": (6,6),
-                     "kcwkcw": (7,7), "kcwkch": (7,6),
-                     "vuy0": (0,8), "0vuy": (8,0),
-                     "vuo0": (1,8), "0vuo": (8,1),
-                     "vch0": (2,8), "0vch": (8,2),
-                     "vcw0": (3,8), "0vcw": (8,3),
-                     "kuy0": (4,8), "0kuy": (8,4),
-                     "kuo0": (5,8), "0kuo": (8,5),
-                     "kch0": (6,8), "0kch": (8,6),
-                     "kcw0": (7,8), "0kcw": (8,7)}
-
-            couples = ["vuyvuy", "vuvouo", "vchvch", "vcwvcw", "vcwvch",
-                       "kuykuy", "kukouo", "kchkch", "kcwkcw", "kcwkch"]
-            singles = ["vuy0", "0vuy", "vuo0", "0vuo",
-                       "vch0", "0vch", "vcw0", "0vcw",
-                       "kuy0", "0kuy", "kuo0", "0kuo",
-                       "kch0", "0kch", "kcw0", "0kcw"]
-
-        torch0 = torch.tensor(0.0, device="cpu").view(1,1)
-        mus0, v0 = xi(ss(0))
-        ssnext0 = choices(mus0, s.t, torch0, tP0, tQ0, tP1, tQ1, netflow, dt, "cpu")
-        mus1, v1 = xi(ss(1))
-        ssnext1 = choices(mus0, s.t, torch0 + 1, tP0, tQ0, tP1, tQ1, netflow, dt, "cpu")
         with sandbox:
-            ps = theta.detach().numpy()
-            st.write("Parameters: " +
-                     ", ".join(["{:.2f}".format(p) for p in ps]))
-
-            cols = st.columns(2)
-            columns_data = zip(cols, [torch0, torch0 + 1])
-            for col, d in columns_data:
-                with col:
-                    st.subheader('$\\Phi_{{t}}({})$'.format(int(d.item())))
-                    df = pd.DataFrame(
-                        tau(theta, s.t, d, "cpu").detach().numpy(),
-                        index=hdmu,
-                        columns=hdmu
-                    )
-                    st.dataframe(df)
-
-            st.subheader('$\\mu_1$ in %')
-            fmarg = ss(1)[0, ndim:2*ndim].detach().numpy().tolist()
-            mmarg = ss(1)[0, 0:ndim].detach().numpy().tolist()
-            st.pyplot(create_heatmap(mus1[0]*100,
-                       ["{:.1f}".format(f*100) for f in fmarg + [0]],
-                       ["{:.1f}".format(m*100) for m in mmarg + [0]]
-                                     , hdmu), use_container_width=False)
-            columns_data = zip(cols, [ssnext0, ssnext1], [v0, v1], range(2))
-            for col, ssnext, v, idx in columns_data:
-                with col:
-                    st.subheader('($M_{{t+1}}^*, F_{{t+1}}^*) $')
-                    df = pd.DataFrame(
-                        ssnext.detach().numpy(),
-                        columns=hds
-                    )
-                    st.dataframe(df, hide_index=True)
-                    st.subheader('$V$')
-                    st.write(v.detach().numpy())
+            show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt)
 
         with process:
             myears = torch.tensor([train0 for _ in range(treat_idcs[0])]
                                 + [True for _ in years[treat_idcs[0]:]])
             ys = torch.tensor(years)[myears].numpy()
-            fig, ax1, ax2 = matched_process_plot(mu_hat[myears,:,:],
-                                                 mu_star[myears,:,:],
-                                                 ys, cells, couples, singles)
+            fig, ax1, ax2 = matched_process_plot(mu_hat[myears, :, :],
+                                                 mu_star[:len(years)][myears, :, :],
+                                                 ys, controls["cells"],
+                                                 controls["couples"], controls["singles"],
+                                                 policy_years=(years[treat_idcs[0]],
+                                                               years[treat_idcs[-1]]))
             st.pyplot(fig, use_container_width=False)
-            #fig.savefig("matched_processes.pdf", format="pdf",
-            #            bbox_inches="tight")
-        with raw:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.header("Observed: $\\widehat{\\mu}_t$")
-            with col2:
-                st.header("Model: $\\mu^*_t$")
-            for (col, mu) in [(col1, mu_hat), (col2, mu_star)]:
-                for i in range(mu.shape[0]):
-                    if vars == "KM":
-                        couples = mu[i,:-1,:-1].reshape(2, 3, 2, 3).sum(axis=(0,2))
-                    else:
-                        couples = mu[i,:-1,:-1]
-                    with col:
-                        pcnc = 2 * couples[:-1,:-1].sum()
-                        pcc = 2 * couples[-1,-1].sum()
-                        pf, pm = mu[i,-1,:].sum(), mu[i,:,-1].sum()
-                        st.subheader("{}".format(years[i]))
-                        #st.write(("$\\underbrace{{{:.3f}}}_{{P(C_{{\\neg m}})}} + " +
-                        #          " \\underbrace{{{:.3f}}}_{{P(C_m)}} + " +
-                        #          " \\underbrace{{{:.3f}}}_{{P(M_0)}} + " +
-                        #          " \\underbrace{{{:.3f}}}_{{P(F_0)}} = " +
-                        #          " {{{:.3f}}} $").format(
-                        #                pcnc, pcc, pm, pf,
-                        #                pcnc + pcc + pm + pf))
-                        df = pd.DataFrame(mu[i].detach().numpy(),
-                                          columns = hdmu, index = hdmu)
-                        #mu[i,:-1,:] * tP[0,:,:].T # mass going to uy
-                        #mu[i,:,:-1] * tQ[:,:,0] # mass going to uy
-                        st.dataframe(df)
-                        df = pd.DataFrame({
-                            'M': mu[i,:-1,:].sum(axis=1).detach().numpy(),
-                            'F': mu[i,:,:-1].sum(axis=0).detach().numpy()
-                            }, index = hdmu[:-1])
-                        st.dataframe(df)
 
-        with net:
-            st.header("Network 0")
-            #dot = make_dot(xi(ss),
-            #               params = dict(xi.named_parameters()),
-            #               show_attrs=True, show_saved=True)
-            #png_data = dot.pipe(format='png')
-            #image = Image.open(io.BytesIO(png_data))
-            #st.image(image, use_column_width=True)
+        with raw:
+            show_raw_matches(mu_hat, mu_star[:len(years)], years,
+                             controls["hdmu"])
 
 
 if __name__ == "__main__":

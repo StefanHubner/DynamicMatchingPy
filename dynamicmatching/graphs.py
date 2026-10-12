@@ -1,32 +1,18 @@
+from functools import partial
+
 import matplotlib.pyplot as plt
-import numpy as np
-import torch 
 import seaborn as sns
-import base64
 import pandas as pd
 
-def matched_process_plot(ss_hat, ss_star):
-    colors = ['b', 'g', 'r', 'c', 'm']
-    fig, ax = plt.subplots(figsize=(10, 10))
-    
-    sh = ss_hat.cpu().detach().numpy()
-    ss = ss_star.cpu().detach().numpy()
-    
-    for i in range(5):
-        ax.plot(sh[:, i], label=f'Shat{i+1}', color=colors[i], linestyle='-')
-        ax.plot(ss[:, i], label=f'Sstar{i+1}', color=colors[i], linestyle='--')
-    ax.legend()
-    ax.set_title('Matched Process')
-    ax.set_xlabel('Time')
-    ax.set_ylabel('Value')
-    return fig
 
-def matched_process_plot(mu_hat, mu_star, years, cells, couples, singles):
+SCENARIO_COLOURS = {"CFF": "#C44E52", "CF0": "#C44E52", "CF1": "#55A868"}
+
+
+def matched_process_plot(mu_hat, mu_star, years, cells, couples, singles,
+                         policy_years=(2001, 2008)):
     prh = lambda n: "$\\widehat{\\mu}_{" + n + "}$"
     prs = lambda n: "$\\mu^*_{" + n + "}$"
     cls = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'orange']
-
-    # Split cells into two groups
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(3.5, 7), dpi = 500)
     muh = mu_hat.cpu().detach().numpy()
@@ -40,9 +26,9 @@ def matched_process_plot(mu_hat, mu_star, years, cells, couples, singles):
                             color=cls[idx], linestyle='-', linewidth=0.75)
             ax.plot(years[1:], mus[1:,i,j], label=f'{prs(k)}',
                     color=cls[idx], linestyle='--', linewidth=0.75)
-            ax.axvspan(2001, 2008, color='grey', alpha=0.1, linewidth=0)
             handles.append(line)
             labels.append(f'{prh(k)}')
+        ax.axvspan(*policy_years, color='grey', alpha=0.1, linewidth=0)
         ax.set_ylim(bottom=0)
         ax.legend(handles, labels, fontsize=6,  loc='upper right')
         ax.set_xticks(years[::4])
@@ -56,18 +42,8 @@ def matched_process_plot(mu_hat, mu_star, years, cells, couples, singles):
     ax1.set_title("Couples", fontsize=8)
     ax2.set_title("Singles", fontsize=8)
 
-    plt.tight_layout()
-    return fig, ax1, ax2
-
-def create_heatmap_simple(tensor, labs):
-    data = tensor.detach().cpu().numpy()
-    fig, ax = plt.subplots(figsize=(3, 3), dpi = 500)
-    sns.heatmap(data, annot=True, fmt=".2f", cmap="Greys",
-                ax=ax, annot_kws={'size': 8}, cbar = False)
-    ax.set_xticklabels(labs)
-    ax.set_yticklabels(labs)
     fig.tight_layout()
-    return fig
+    return fig, ax1, ax2
 
 def create_heatmap(tensor, x2lab, y2lab, ticklabs):
     data = tensor.detach().cpu().numpy()
@@ -106,150 +82,93 @@ def create_heatmap(tensor, x2lab, y2lab, ticklabs):
     fig.tight_layout()
     return fig
 
-def svg_to_data_url(svg_string):
-    b64 = base64.b64encode(svg_string.encode('utf-8')).decode('utf-8')
-    return f'data:image/svg+xml;base64,{b64}'
+def _select(df, **levels):
+    selectors = tuple(levels.get(name, slice(None)) for name in df.columns.names)
+    return df.loc[:, selectors]
 
-def plot_cf_grid(df, sex, dim=(4, 2), beyond=0, treatcut=7, pymin=0):
-    cols = df.columns
-    scenario_level, sex_level, est_level, state_level = range(4)
-    mask = (
-        cols.get_level_values(scenario_level).isin(["CFF", "CF1"])
-        & (cols.get_level_values(sex_level) == sex)
-        & (cols.get_level_values(est_level) == "star")
-    )
-    state_vals = cols[mask].get_level_values(state_level)
-    states = pd.Index(state_vals).unique()
 
-    nrows, ncols = dim
-    fs = (10, 12) if (nrows > 1 and ncols > 1) else (10, 4)
-    fig, axes = plt.subplots(nrows, ncols, figsize=fs,
-                             sharex=(nrows > 1), squeeze=False)
+def _plot_series(ax, frame, level, beyond=0, forecast_start=None):
+    sub = frame.copy()
+    sub.columns = sub.columns.get_level_values(level)
+    colours = [SCENARIO_COLOURS[col] for col in sub.columns] if level == "scenario" else None
+    cut = len(sub) - beyond if forecast_start is None else sub.index.astype(int).searchsorted(forecast_start)
+
+    if cut < len(sub):
+        for col, colour in zip(sub.columns, colours):
+            ax.plot(sub.index[:cut], sub[col].iloc[:cut], '-',
+                    color=colour, linewidth=2, label=col)
+            ax.plot(sub.index[cut-1:], sub[col].iloc[cut-1:], '--',
+                    color=colour, linewidth=2)
+        ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
+    else:
+        sub.plot(ax=ax, color=colours)
+
+
+def _plot_grid(frame, panels, draw, dim, figsize, sharex=True, sharey=False, pymin=None):
+    fig, axes = plt.subplots(*dim, figsize=figsize, sharex=sharex,
+                             sharey=sharey, squeeze=False)
     axes = axes.ravel()
-    idx = pd.IndexSlice
-
-    ymaxs = []
-
-    for ax, state in zip(axes, states):
-        sub = df.loc[:, idx[["CFF", "CF1"], sex, "star", state]].copy()
-        sub.columns = sub.columns.get_level_values(0)
-        colours = ['#C44E52', '#55A868']
-        width = [2, 2]
-
-        if beyond > 0:
-            cut = len(sub) - beyond
-            for i, col in enumerate(sub.columns):
-                color = colours[i]
-                ax.plot(sub.index[:treatcut], sub[col].iloc[:treatcut], '-', color=color, linewidth=width[i], label=col)
-                ax.plot(sub.index[treatcut-1:cut], sub[col].iloc[treatcut-1:cut], '-', color=color, linewidth=2, label=col)
-                ax.plot(sub.index[cut-1:], sub[col].iloc[cut-1:], '--', color=color, linewidth=2)
-            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
-        else:
-            sub.plot(ax=ax, color=colours)
-
-        ax.set_title(state)
+    panels = list(panels)
+    for ax, (title, selectors) in zip(axes, panels):
+        draw(ax, _select(frame, **selectors))
+        ax.set_title(str(title))
         ax.set_xlabel("")
         if ax.legend_ is not None:
             ax.legend_.remove()
 
-        _, ymax = ax.get_ylim()
-        ymaxs.append(ymax)
+    visible = axes[:len(panels)]
+    if len(visible):
+        if pymin is not None:
+            ymax = max(ax.get_ylim()[1] for ax in visible)
+            for ax in visible:
+                ax.set_ylim(pymin, ymax)
+        else:
+            max_range = max(ax.get_ylim()[1] - ax.get_ylim()[0] for ax in visible)
+            for ax in visible:
+                ymin, ymax = ax.get_ylim()
+                mid = (ymin + ymax) / 2
+                ax.set_ylim(mid - max_range / 2, mid + max_range / 2)
 
-    common_ymax = max(ymaxs)
-
-    for ax in axes[:len(states)]:
-        ax.set_ylim(pymin, common_ymax)
-
-    for k in range(len(states), len(axes)):
-        axes[k].set_visible(False)
-
+    for ax in axes[len(panels):]:
+        ax.set_visible(False)
     fig.tight_layout()
-    return fig, df.loc[:, idx[["CFF", "CF1"], sex, "star", states]]
+    return fig
+
+
+def plot_cf_grid(df, sex, dim=(4, 2), beyond=0, pymin=0,
+                 forecast_start=None):
+    selected = _select(df, scenario=["CFF", "CF1"], sex=sex, estimator="star")
+    states = selected.columns.get_level_values("state").unique()
+    panels = ((state, {"state": state}) for state in states)
+    nrows, ncols = dim
+    figsize = (10, 12) if (nrows > 1 and ncols > 1) else (10, 4)
+    # 2026-10-12: Share grid formatting and the solid/forecast line renderer.
+    draw = partial(_plot_series, level="scenario", beyond=beyond, forecast_start=forecast_start)
+    fig = _plot_grid(selected, panels, draw, dim, figsize, sharex=(nrows > 1), pymin=pymin)
+    return fig, selected
+
 
 def plot_estimator_grid(df: pd.DataFrame, sex: str = "M",
                         scenario: str = "CFF",
                         nrows: int = 4, ncols: int = 2):
-    cols = df.columns
-    scenario_level, sex_level, est_level, state_level = range(4)
-    mask = (
-        (cols.get_level_values(scenario_level) == scenario)
-        & (cols.get_level_values(sex_level) == sex)
-        & cols.get_level_values(est_level).isin(["star", "hat"])
-    )
-    state_vals = cols[mask].get_level_values(state_level)
-    states = pd.Index(state_vals).unique()
-    fig, axes = plt.subplots(nrows, ncols, figsize=(10, 12), sharex=True, sharey=True)
-    axes = axes.ravel()
-    idx = pd.IndexSlice
-    for ax, state in zip(axes, states):
-        sub = df.loc[:, idx[scenario, sex, ["star", "hat"], state]].copy()
-        sub.columns = sub.columns.get_level_values(2)
-        sub.plot(ax=ax)
-        ax.set_title(str(state))
-        ax.set_xlabel("")
-        if ax.legend_ is not None:
-            ax.legend_.remove()
-    for k in range(len(states), len(axes)):
-        axes[k].set_visible(False)
-    # equalise y-scale
-    visible = axes[:len(states)]
-    max_range = max(ax.get_ylim()[1] - ax.get_ylim()[0] for ax in visible)
-    for ax in visible:
-        ymin, ymax = ax.get_ylim()
-        mid = (ymin + ymax) / 2
-        ax.set_ylim(mid - max_range / 2, mid + max_range / 2)
-    fig.tight_layout()
-    return fig
+    selected = _select(df, scenario=scenario, sex=sex, estimator=["star", "hat"])
+    states = selected.columns.get_level_values("state").unique()
+    panels = ((state, {"state": state}) for state in states)
+    fig = _plot_grid(selected, panels, partial(_plot_series, level="estimator"),
+                     (nrows, ncols), (10, 12), sharey=True)
+    return fig, selected
+
 
 def plot_margin_counterfactuals(df: pd.DataFrame,
                                 estimator: str = "star",
                                 scenarios=("CF0", "CF1"),
                                 beyond: int = 0,
-                                treatcut: int = 7):
-    idx = pd.IndexSlice
-    sexes = ["Male", "Female"]
-    shorts = {"Male": "M", "Female": "F"}
+                                forecast_start=None):
     states = ["Unmarried", "Home Production", "Market Work"]
-
-    fig, axes = plt.subplots(2, 3, figsize=(12, 6), sharex=True)
-    axes = axes.reshape(2, 3)
-
-    colours = ['#C44E52', '#55A868']
-    widths = [2, 2]
-    ymaxs = []
-
-    for i, sex in enumerate(sexes):
-        for j, state in enumerate(states):
-            ax = axes[i, j]
-            sub = df.loc[:, idx[list(scenarios), shorts[sex], estimator, state]].copy()
-            sub.columns = sub.columns.get_level_values(0)
-
-            if beyond > 0:
-                cut = len(sub) - beyond
-                for k, col in enumerate(sub.columns):
-                    color = colours[k]
-                    ax.plot(sub.index[:treatcut], sub[col].iloc[:treatcut],
-                            '-', color=color, linewidth=widths[k], label=col)
-                    ax.plot(sub.index[treatcut-1:cut], sub[col].iloc[treatcut-1:cut],
-                            '-', color=color, linewidth=widths[k], label=col)
-                    ax.plot(sub.index[cut-1:], sub[col].iloc[cut-1:],
-                            '--', color=color, linewidth=widths[k])
-                ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=5))
-            else:
-                sub.plot(ax=ax, color=colours)
-
-            ax.set_title(f"{sex}, {state}")
-            ax.set_xlabel("")
-            if ax.legend_ is not None:
-                ax.legend_.remove()
-
-            _, ymax = ax.get_ylim()
-            ymaxs.append(ymax)
-
-    common_ymax = max(ymaxs)
-
-    for ax in axes.ravel():
-        ax.set_ylim(0, common_ymax)
-
-    fig.tight_layout()
-    return fig, df.loc[:, idx[list(scenarios), ["M", "F"], estimator, states]]
+    selected = _select(df, scenario=list(scenarios), sex=["M", "F"],
+                       estimator=estimator, state=states)
+    panels = ((f"{sex}, {state}", {"sex": short, "state": state})
+              for sex, short in [("Male", "M"), ("Female", "F")] for state in states)
+    draw = partial(_plot_series, level="scenario", beyond=beyond, forecast_start=forecast_start)
+    fig = _plot_grid(selected, panels, draw, (2, 3), (12, 6), pymin=0)
+    return fig, selected
