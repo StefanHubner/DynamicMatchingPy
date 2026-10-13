@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 import torch
 
-from .bellman import choices, match_moments
+from .bellman import choices, conditional_kl_loss, match_moments
 from .graphs import create_heatmap
 
 
@@ -73,6 +73,7 @@ SANDBOX_LAYOUTS = {
 }
 
 
+@torch.no_grad()
 def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
              scale, masks, tis, years, cf, train0, beyond):
     _, muh1, mus, _, conds, margs, vs = match_moments(xi, theta,
@@ -87,6 +88,12 @@ def _series_columns(scenario, sex, estimator, tensor, states):
     return {(scenario, sex, estimator, label):
             tensor[(slice(None),) + indices].flatten().detach().numpy()
             for label, indices in states}
+
+
+def _plot_frame(series, labels):
+    frame = pd.DataFrame(series, index=labels)
+    frame.columns = pd.MultiIndex.from_tuples(frame.columns, names=COLUMN_NAMES)
+    return frame
 
 
 def prepare_plot_frames(results, years, treat_idcs, train0, beyond):
@@ -104,12 +111,18 @@ def prepare_plot_frames(results, years, treat_idcs, train0, beyond):
         columns["welfare"].update(_series_columns(scenario, "both", "star",
                                                  welfare[start:], [("Welfare", (0,))]))
 
-    frames = {}
-    for name, series in columns.items():
-        frame = pd.DataFrame(series, index=labels)
-        frame.columns = pd.MultiIndex.from_tuples(frame.columns, names=COLUMN_NAMES)
-        frames[name] = frame
-    return frames
+    return {name: _plot_frame(series, labels) for name, series in columns.items()}
+
+
+def prepare_fit_frame(result, years, treat_idcs, train0, masks):
+    mu_hat, mu_star, _, _, _ = result
+    start = 0 if train0 else treat_idcs[0]
+    # 2026-10-12: Compare historical observed and model matches, excluding forecast alignment copies.
+    conditional = conditional_kl_loss(mu_hat[start:], mu_star[start:len(mu_hat)], masks)[1:5]
+    series = {}
+    for (sex, estimator), tensor in zip(SERIES_NAMES, conditional):
+        series.update(_series_columns("CFF", sex, estimator, tensor, CONDITIONAL_STATES))
+    return _plot_frame(series, [str(year) for year in years[start:len(mu_hat)]])
 
 
 def save_plot(plotter, frame, filename, csv=False, **kwargs):

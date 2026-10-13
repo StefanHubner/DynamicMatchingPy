@@ -9,13 +9,13 @@ from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 from copy import deepcopy
 
-from dynamicmatching import create_closure, overallPQ
+from dynamicmatching import create_closure, create_netflow, overallPQ
 from dynamicmatching import tauMcal, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
 from dynamicmatching import scaleMcal, scaleMScal, scaleMScaltrend, tauMScaltrend
 from dynamicmatching import matched_process_plot, plot_cf_grid, plot_estimator_grid, plot_margin_counterfactuals
 from dynamicmatching import SinkhornGeneric
 from dynamicmatching import NelderMeadOptimizer
-from dynamicmatching.reporting import load_mus, prepare_plot_frames, save_plot
+from dynamicmatching.reporting import load_mus, prepare_plot_frames, prepare_fit_frame, save_plot
 from dynamicmatching.reporting import sandbox_controls, show_sandbox, show_raw_matches
 
 
@@ -37,7 +37,7 @@ def load_data(name, dev):
 
 
 def main(train = False, noload = False, lbfgs = False,
-         neldermead = False, matchingplot = False):
+         neldermead = False, matchingplot = False, fixedflows = False):
 
     torch.set_printoptions(precision=4, sci_mode=False)
     if torch.cuda.is_available() and not matchingplot:
@@ -101,7 +101,8 @@ def main(train = False, noload = False, lbfgs = False,
     vars, ndim, (maskc, mask0), tau, scale, thetadim, theta0, years, train0 = spec
     outdim = thetadim + 2 * ndim + 1
     tPs, tQs, tMuHat, ee = load_data(vars, dev)
-    netflow = (ee * torch.tensor([1,-1], device = dev).unsqueeze(0)).sum(1)
+    treat_idcs = [i for i, t in enumerate(years) if 2001 <= t <= 2008]
+    netflow = create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0, fixedflows)
     masks = (torch.tensor(maskc, dtype=torch.bool, device=dev),
              torch.tensor(mask0, dtype=torch.bool, device=dev))
 
@@ -129,7 +130,6 @@ def main(train = False, noload = False, lbfgs = False,
         network.load_state_dict(xi_sd) # mutable operation
     xi = network.to(dev)
     ng = 2**12 # max 2**19 number of draws (uniform gridpoints)
-    treat_idcs = [i for i, t in enumerate(years) if 2001 <= t <= 2008]
     xihat, thetahat, losshat = deepcopy(xi), theta.detach().clone(), 10e30
 
     if lbfgs:
@@ -214,7 +214,8 @@ def main(train = False, noload = False, lbfgs = False,
         mu_hat = tMuHat.cpu()
 
         # 2026-10-12: Keep the reporting workflow here; preparation and display details live in reporting.py.
-        beyond = 20
+        # 2026-10-13: Stop the current estimates before negative populations in 2033/2037.
+        beyond = {"MScal": 12, "MScaltrend": 16}.get(current, 20)
         scenarios = {"CFF": CF.None_, "CF0": CF.HighCost, "CF1": CF.LowCost}
         results = {}
         for name, cf in scenarios.items():
@@ -224,18 +225,20 @@ def main(train = False, noload = False, lbfgs = False,
 
         frames = prepare_plot_frames(results, years, treat_idcs, train0, beyond)
         conditional = frames["conditional"].iloc[1:, :]
+        fitted = prepare_fit_frame(results["CFF"], years, treat_idcs, train0, masks).iloc[1:, :]
+        # 2026-10-12: Prefix plot and CSV exports with their specification.
         for sex in ("M", "F"):
-            save_plot(plot_cf_grid, conditional, f"{sex}_cf1_grid.pdf", sex=sex)
-            save_plot(plot_estimator_grid, conditional, f"star_hat_{sex}_grid.pdf",
+            save_plot(plot_cf_grid, conditional, f"{current}_{sex}_cf1_grid.pdf", sex=sex)
+            save_plot(plot_estimator_grid, fitted, f"{current}_star_hat_{sex}_grid.pdf",
                       sex=sex, scenario="CFF")
 
-        save_plot(plot_cf_grid, frames["joint"].iloc[1:, :], "joint1_cf1_grid.pdf",
+        save_plot(plot_cf_grid, frames["joint"].iloc[1:, :], f"{current}_joint1_cf1_grid.pdf",
                   csv=True, sex="both", dim=(3, 3), beyond=beyond,
                   forecast_start=years.stop)
-        save_plot(plot_margin_counterfactuals, frames["marginal"], "margins_CF.pdf",
+        save_plot(plot_margin_counterfactuals, frames["marginal"], f"{current}_margins_CF.pdf",
                   csv=True, estimator="star", scenarios=("CFF", "CF1"),
                   beyond=beyond, forecast_start=years.stop)
-        save_plot(plot_cf_grid, frames["welfare"], "V_cf.pdf",
+        save_plot(plot_cf_grid, frames["welfare"], f"{current}_V_cf.pdf",
                   csv=True, sex="both", dim=(1, 1), beyond=beyond,
                   forecast_start=years.stop)
 
@@ -292,5 +295,8 @@ if __name__ == "__main__":
     parser.add_argument("--matchingplot",
                         action="store_true",
                         help="Run this script only to generate plots.")
+    parser.add_argument("--fixedflows",
+                        action="store_true",
+                        help="Use fixed entry/exit amounts instead of proportional exits.")
     args = parser.parse_args()
-    main(args.train, args.noload, args.lbfgs, args.neldermead, args.matchingplot)
+    main(args.train, args.noload, args.lbfgs, args.neldermead, args.matchingplot, args.fixedflows)

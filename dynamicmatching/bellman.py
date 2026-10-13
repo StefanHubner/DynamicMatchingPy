@@ -67,7 +67,7 @@ def choices_vectorised(mus, p, q, dev):
          torch.matmul(tMuF.view(-1, q.shape[1]), q.T)],
         dim=1)
 
-def choices(mus, t, d, p0, q0, p1, q1, netflow, dt, dev):
+def incumbent_population(mus, d, p0, q0, p1, q1):
     tMuM = mus[:,:-1,:]
     tMuF = mus[:,:,:-1]
     alpha = d.view(-1, 1, 1, 1)
@@ -75,11 +75,26 @@ def choices(mus, t, d, p0, q0, p1, q1, netflow, dt, dev):
     q = (1.0 - alpha) * q0.unsqueeze(0) + alpha * q1.unsqueeze(0)
     M = torch.einsum('nij,nijk->nk', tMuM, p)
     F = torch.einsum('nij,nijk->nk', tMuF, q)
-    #M = torch.einsum('nij,ijk->nk', tMuM, p)
-    #F = torch.einsum('nij,ijk->nk', tMuF, q)
-    Sincumb = torch.cat([M, F], dim=1)
-    nf2 = torch.cat([netflow, netflow]).unsqueeze(dim=0)
-    S0 = Sincumb + nf2 # as an absolute flow
+    return torch.cat([M, F], dim=1)
+
+def create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0, fixed=False):
+    # 2026-10-13: Keep entries fixed; calibrate exits on observed post-kernel stocks, retaining flows per sex.
+    entries, exits = ee[:, 0].repeat(2), ee[:, 1].repeat(2)
+    if fixed:
+        return lambda s: (entries - exits).to(s)
+    start = 0 if train0 else treat_idcs[0]
+    regimes = tMuHat.new_zeros(len(tMuHat))
+    regimes[treat_idcs] = 1
+    reference = incumbent_population(tMuHat[start:], regimes[start:],
+                                     tPs[2], tQs[2], tPs[1], tQs[1]).mean(0)
+    rates = exits / reference
+    if not torch.all(torch.isfinite(rates) & (rates >= 0) & (rates <= 1)):
+        raise ValueError("Calibrated annual exit rates must lie between zero and one.")
+    return lambda s: entries.to(s) - rates.to(s) * s
+
+def choices(mus, t, d, p0, q0, p1, q1, netflow, dt, dev):
+    Sincumb = incumbent_population(mus, d, p0, q0, p1, q1)
+    S0 = Sincumb + netflow(Sincumb)
     # 2026-10-02: Normalize each sampled economy separately after net flows.
     S = S0 / S0.sum(dim=1, keepdim=True)
     return torch.cat([S, t + dt, d], dim = 1)
