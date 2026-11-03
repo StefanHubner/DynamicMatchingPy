@@ -148,6 +148,18 @@ def plot_cf_grid(df, sex, dim=(4, 2), beyond=0, pymin=0,
     return fig, selected
 
 
+def plot_individual_welfare(df, sex, beyond=0, forecast_start=None):
+    # 2026-11-03: Reuse counterfactual grids while allowing signed individual dual values.
+    ndim = len(df.columns.get_level_values("state").unique())
+    fig, selected = plot_cf_grid(df, sex, dim=(1, ndim), beyond=beyond,
+                                 pymin=None, forecast_start=forecast_start)
+    fig.suptitle({"M": "Male", "F": "Female"}[sex] + " individual welfare")
+    for ax in fig.axes:
+        ax.set_ylabel("Individual welfare")
+    fig.tight_layout()
+    return fig, selected
+
+
 def plot_estimator_grid(df: pd.DataFrame, sex: str = "M",
                         scenario: str = "CFF",
                         nrows: int = 4, ncols: int = 2):
@@ -164,11 +176,11 @@ def plot_margin_counterfactuals(df: pd.DataFrame,
                                 scenarios=("CF0", "CF1"),
                                 beyond: int = 0,
                                 forecast_start=None):
-    states = ["Unmarried", "Home Production", "Market Work"]
     selected = _select(df, scenario=list(scenarios), sex=["M", "F"],
-                       estimator=estimator, state=states)
+                       estimator=estimator)
+    states = selected.columns.get_level_values("state").unique()
     panels = ((f"{sex}, {state}", {"sex": short, "state": state})
               for sex, short in [("Male", "M"), ("Female", "F")] for state in states)
     draw = partial(_plot_series, level="scenario", beyond=beyond, forecast_start=forecast_start)
-    fig = _plot_grid(selected, panels, draw, (2, 3), (12, 6), pymin=0)
+    fig = _plot_grid(selected, panels, draw, (2, len(states)), (4 * len(states), 6), pymin=0)
     return fig, selected

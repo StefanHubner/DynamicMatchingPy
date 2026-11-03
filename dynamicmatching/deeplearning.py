@@ -1,27 +1,5 @@
 import torch
 import torch.nn as nn
-import math
-from .helpers import extend
-
-def sinkhorn_knopp(A, row_margins, col_margins, iter):
-    epsilon = 1e-12
-    for _ in range(iter):
-        row_sums = A.sum(dim=1, keepdim=True)
-        A = A * (row_margins.unsqueeze(1) / (row_sums + epsilon))
-        col_sums = A.sum(dim=0, keepdim=True)
-        A = A * (col_margins.unsqueeze(0) / (col_sums + epsilon))
-    return A
-
-def margin_projection_inline(mu, M, F, iterations=20, epsilon=1e-8):
-    mu = torch.clamp(mu, min=epsilon)
-    for _ in range(iterations):
-        row_sums = mu[:-1].sum(dim=1)
-        row_scaling = M[:-1] / row_sums
-        mu[:-1] = mu[:-1] * row_scaling.view(-1, 1)
-        col_sums = mu[:, :-1].sum(dim=0)
-        col_scaling = F[:-1] / col_sums
-        mu[:, :-1] = mu[:, :-1] * col_scaling.view(1, -1)
-    return mu
 
 def margin_projection(mu, M, F, iterations=20, epsilon=1e-8, tol=1e-6):
     current_mu = mu # torch.clamp(mu, min=epsilon)
@@ -61,8 +39,12 @@ class Sinkhorn(nn.Module):
         self.ti = range(self.theta_dim)
         self.m0i = range(self.theta_dim, self.theta_dim + ndim)
         self.f0i = range(self.theta_dim + ndim, self.theta_dim + 2*ndim)
+        # 2026-11-03: Append signed male/female dual values and the fixed-flow continuation term.
+        self.vi = self.theta_dim + 2*ndim
+        self.wmi = range(self.vi + 1, self.vi + 1 + ndim)
+        self.wfi = range(self.vi + 1 + ndim, self.vi + 1 + 2*ndim)
         self.tau = tau
-        self.sinkhorn = sinkhorn_knopp
+        self.sinkhorn = margin_projection
         self.num_iterations = num_iterations
         self.layers = self._build_layers(hidden_layers)
     def _build_layers(self, hidden_layers):
@@ -88,8 +70,6 @@ class Sinkhorn(nn.Module):
 class SinkhornGeneric(Sinkhorn):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.sinkhorn = margin_projection
-        self.extend = extend
         self.num_iterations = 25
 
     def forward(self, margins_td):
@@ -107,86 +87,15 @@ class SinkhornGeneric(Sinkhorn):
         muc0f = torch.exp(pars[:, self.f0i]) # positive!
         muc[:, :(M.shape[1]-1), -1:] = mucm0.view(-1, (M.shape[1]-1), 1)
         muc[:, -1:, :(F.shape[1]-1)] = muc0f.view(-1, 1, (F.shape[1]-1))
-        V = torch.exp(pars[:, -1])
+        V = torch.exp(pars[:, self.vi])
+        wm, wf, J = pars[:, self.wmi], pars[:, self.wfi], pars[:, -1]
         stk = torch.cat((muc, M.unsqueeze(2), F.unsqueeze(2)), dim=2)
         iter = self.num_iterations if self.training else 100
         mus = torch.vmap(lambda p: self.sinkhorn(p[:,range(self.ndim+1)],
                                                  p[:,(self.ndim+1)],
                                                  p[:,(self.ndim+2)],
                                                  iter))(stk)
-        return mus, V
-
-# Should now be deprecated in favor of SinkhornGeneric
-class SinkhornMS(Sinkhorn):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.sinkhorn = margin_projection
-        self.extend = extend
-        self.num_iterations = 25
-
-    def forward(self, margins_td):
-        zs = torch.zeros((margins_td.shape[0], 1),
-                         device = margins_td.device)
-        M = torch.cat((margins_td[:, 0:4], zs), dim=1)
-        F = torch.cat((margins_td[:, 4:8], zs), dim=1)
-        ts = margins_td[:,8]
-        ds = margins_td[:,9]
-        pars = self.layers(margins_td)
-        vmapper = torch.vmap(lambda p, t, d: self.tau(p, t, d, pars.device),
-                             in_dims=(0, 0, 0))
-        muc = vmapper(torch.exp(pars[:, self.ti]), ts, ds)  # pos, t/d-dep!
-        mucm0 = torch.exp(pars[:, self.m0i]) # pos!
-        muc0f = torch.exp(pars[:, self.f0i]) # pos!
-        muc[:, :(M.shape[1]-1), -1:] = mucm0.view(-1, (M.shape[1]-1), 1)
-        muc[:, -1:, :(F.shape[1]-1)] = muc0f.view(-1, 1, (F.shape[1]-1))
-        V = torch.exp(pars[:, -1])
-        stk = torch.cat((muc, M.unsqueeze(2), F.unsqueeze(2)), dim=2)
-        iter = self.num_iterations if self.training else 100
-        mus = torch.vmap(lambda p: self.sinkhorn(p[:, 0:5],
-                                                 p[:, 5],
-                                                 p[:, 6],
-                                                 iter))(stk)
-        return mus, V
-
-
-# Old proportion of singles management, deprecated
-class SinkhornM3x3(Sinkhorn):
-    def forward(self, margins):
-        M, F = margins[:, 0:3], margins[:, 3:6]
-        pars = self.layers(margins)
-        muc = torch.vmap(lambda p: self.tau(p, pars.device),
-                         in_dims=0)(torch.exp(pars[:, 0:4]))  # positive!
-        sqs = SquashedSigmoid(0.02, 0.98)
-        shm, shf = sqs(pars[:, 4:6]), sqs(pars[:, 6:8])
-        V = torch.exp(pars[:, -1])
-        ones = torch.ones(M.shape[0], 1, device=pars.device)
-        shm0 = torch.cat((shm, ones), dim=1)  # proportion of couples
-        shf0 = torch.cat((shf, ones), dim=1)
-        mucm0, muc0f = M * shm0, F * shf0  # couples
-        mum0, mu0f = M * (1 - shm0), F * (1 - shf0)  # singles
-        stk = torch.cat((muc, mucm0.view(-1, M.shape[1], 1),
-                         muc0f.view(-1, F.shape[1], 1)), dim=2)
-        iter = self.num_iterations if self.training else 1000
-        muc = torch.vmap(lambda p: self.sinkhorn(p[:, 0:2],
-                                                 p[:, 2],
-                                                 p[:, 3],
-                                                 iter), in_dims=0)(stk)
-        mus = torch.cat((torch.cat((muc, mum0.view(-1, M.shape[1], 1)),
-                                   dim=2),
-                         torch.cat((mu0f.view(-1, 1, F.shape[1]),
-                                    torch.zeros(F.shape[0], 1, 1,
-                                                device=pars.device)),
-                                   dim=2)
-                         ), dim=1)
-        return mus, V
-
-class SquashedSigmoid(nn.Module):
-    def __init__(self, low=0.02, high=0.98):
-        super().__init__()
-        self.low = low
-        self.high = high
-    def forward(self, x):
-        return self.low + (self.high - self.low) * torch.sigmoid(x)
+        return mus, V, wm, wf, J
 
 class MaskedLog(torch.autograd.Function):
     @staticmethod

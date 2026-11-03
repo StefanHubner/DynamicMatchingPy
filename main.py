@@ -10,14 +10,18 @@ from huggingface_hub import hf_hub_download
 from copy import deepcopy
 
 from dynamicmatching import create_closure, create_netflow, overallPQ
-from dynamicmatching import tauMcal, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
+from dynamicmatching import tauMcal, tauMScal, masksM, masksMS, TermColours, CF
 from dynamicmatching import scaleMcal, scaleMScal, scaleMScaltrend, tauMScaltrend
 from dynamicmatching import matched_process_plot, plot_cf_grid, plot_estimator_grid, plot_margin_counterfactuals
+from dynamicmatching import plot_individual_welfare
 from dynamicmatching import SinkhornGeneric
 from dynamicmatching import NelderMeadOptimizer
 from dynamicmatching.reporting import load_mus, prepare_plot_frames, prepare_fit_frame, save_plot
 from dynamicmatching.reporting import sandbox_controls, show_sandbox, show_raw_matches
 
+
+# 2026-10-22: Set the annual discount factor once for estimation and welfare reporting.
+beta = 0.95
 
 st.set_page_config(page_title="Dynamic Matching")
 
@@ -37,7 +41,7 @@ def load_data(name, dev):
 
 
 def main(train = False, noload = False, lbfgs = False,
-         neldermead = False, matchingplot = False, fixedflows = False):
+         neldermead = False, matchingplot = False):
 
     torch.set_printoptions(precision=4, sci_mode=False)
     if torch.cuda.is_available() and not matchingplot:
@@ -50,56 +54,28 @@ def main(train = False, noload = False, lbfgs = False,
     torch.autograd.set_detect_anomaly(True)
 
     # Define specification and load appropriate dataset
-    # outdim = par dim + # of single types + value vct
-    # (name, state dim, net class, masks, basis, par dim, ys, train0, name)
+    # outdim = policy parameters + singles + aggregate value + type values + flow value
+    # (dataset, ndim, masks, tau, scale, thetadim, theta0, years, train0, fixedflows)
+    # 2026-11-03: Retain three dual specifications, using additive entry and exit for estimation.
     current = args.spec
-    tpl = lambda a: (a, a)
-    scale1 = lambda d: lambda _, dev: tpl(torch.ones(d, device=dev))
 
-    spec  = { "Mcal1":
-                ("M", 2, masksM, tauMcal, scale1(2), 2, None,
-                 range(1999, 2021), False),
-              "Mcal":
+    spec  = { "Mcal":
                 ("M", 2, masksM, tauMcal, scaleMcal, 2+1, None,
-                 range(1999, 2021), False),
-              "MS":
-                ("MS", 3, masksMS, tauMS, scale1(3), 10, None,
-                 range(1999, 2021), False),
-              "MStrend":
-                ("MS", 3, masksMS, tauMStrend, scale1(3), 14, None,
-                 range(1999, 2021), False),
-              "MScal1":
-                ("MS", 3, masksMS, tauMScal, scale1(3), 5, None,
-                 range(1999, 2021), False),
+                 range(1999, 2021), False, True),
               "MScal":
                 # 2026-10-02: One fixed reference scale leaves two estimated type scales.
                 ("MS", 3, masksMS, tauMScal, scaleMScal, 5+2, None,
-                 range(1999, 2021), False),
-              "MScalold":
-                # 2026-10-02: Retain the legacy eight-parameter model with three free scales.
-                ("MS", 3, masksMS, tauMScal,
-                 lambda par, dev: tpl(torch.exp(par[5:])), 5+3, None,
-                 range(1999, 2021), False),
+                 range(1999, 2021), False, True),
               "MScaltrend":
                 # 2026-10-06: Fresh coefficients and zero initial slopes; all trends remain free.
                 ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2,
                  5 * [0.1] + 5 * [0.0] + 2 * [0.1],
-                 range(1999, 2021), False),
-              "MScaltrend2":
-                ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2, None,
-                 range(1999, 2021), False),
-              "MStri":
-                ("MS", 3, masksMS, tauMStri, scale1(3), 8, None,
-                 range(1999, 2021), False),
-              "KMS":
-                ("KMS", 8, masksKMS, tauKMS, scale1(8), 12, None,
-                 range(1999, 2021), False),
-              "KMSclosed":
-                ("KMS", 8, masksKMS, tauKMS, scale1(8), 12, None,
-                 range(1999, 2021), False)
+                 range(1999, 2021), False, True)
              }[current]
-    vars, ndim, (maskc, mask0), tau, scale, thetadim, theta0, years, train0 = spec
-    outdim = thetadim + 2 * ndim + 1
+    vars, ndim, (maskc, mask0), tau, scale, thetadim, theta0, years, train0, fixedflows = spec
+    if train and not fixedflows:
+        raise ValueError("Dual estimation requires additive flows (fixedflows=True).")
+    outdim = thetadim + 4 * ndim + 2
     tPs, tQs, tMuHat, ee = load_data(vars, dev)
     treat_idcs = [i for i, t in enumerate(years) if 2001 <= t <= 2008]
     netflow = create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0, fixedflows)
@@ -111,9 +87,7 @@ def main(train = False, noload = False, lbfgs = False,
         repo = "StefanHubner/DutchDivorce"
         f = lambda n: hf_hub_download(
             repo_id = repo,
-            filename = n + ("MScal" if current == "MScalold" else current) + ".pt",
-            # 2026-10-02: Pin legacy files so future MScal checkpoints cannot replace them.
-            revision = "ba7727a7e639833895967f9fa4241b385bbcde91" if current == "MScalold" else None,
+            filename = n + current + ".pt",
             cache_dir = ".hfcache"
         )
         theta = torch.load(f("theta"),
@@ -150,7 +124,7 @@ def main(train = False, noload = False, lbfgs = False,
                                               tPs, tQs, tMuHat, netflow,
                                               ng, dev, tau, scale, masks,
                                               treat_idcs, years, optim,
-                                              CF.None_, train0, not neldermead)
+                                              CF.None_, train0, beta, not neldermead)
         best_evaluation = None
         # 2026-10-02: Snapshot each evaluated pair before the outer optimizer changes theta or xi.
         def tracked_closure():
@@ -214,33 +188,49 @@ def main(train = False, noload = False, lbfgs = False,
         mu_hat = tMuHat.cpu()
 
         # 2026-10-12: Keep the reporting workflow here; preparation and display details live in reporting.py.
-        # 2026-10-13: Stop the current estimates before negative populations in 2033/2037.
-        beyond = {"MScal": 12, "MScaltrend": 16}.get(current, 20)
+        # 2026-10-13: Keep shorter fixed-flow windows; proportional flows use the full horizon.
+        beyond = {"MScal": 12, "MScaltrend": 16}.get(current, 20) if fixedflows else 20
         scenarios = {"CFF": CF.None_, "CF0": CF.HighCost, "CF1": CF.LowCost}
-        results = {}
-        for name, cf in scenarios.items():
-            results[name] = load_mus(xi, theta, tPs, tQs, mu_hat, netflow,
-                                     ng, "cpu", tau, scale, masks,
-                                     treat_idcs, years, cf, train0, beyond)
+        welfare_measures = [("flow", 0, "", "Welfare")]
+        if not fixedflows:
+            welfare_measures.append(("discounted", 1000, "_discounted", "Discounted welfare"))
+        results_by_welfare = {}
+        for measure, horizon, _, _ in welfare_measures:
+            results_by_welfare[measure] = {
+                name: load_mus(xi, theta, tPs, tQs, mu_hat, netflow,
+                               ng, "cpu", tau, scale, masks,
+                               treat_idcs, years, cf, train0, beyond, beta,
+                               welfare_horizon=horizon)
+                for name, cf in scenarios.items()}
 
-        frames = prepare_plot_frames(results, years, treat_idcs, train0, beyond)
+        frames_by_welfare = {measure: prepare_plot_frames(result, years, treat_idcs, train0, beyond)
+                             for measure, result in results_by_welfare.items()}
+        results, frames = results_by_welfare["flow"], frames_by_welfare["flow"]
         conditional = frames["conditional"].iloc[1:, :]
         fitted = prepare_fit_frame(results["CFF"], years, treat_idcs, train0, masks).iloc[1:, :]
         # 2026-10-12: Prefix plot and CSV exports with their specification.
         for sex in ("M", "F"):
-            save_plot(plot_cf_grid, conditional, f"{current}_{sex}_cf1_grid.pdf", sex=sex)
+            save_plot(plot_cf_grid, conditional, f"{current}_{sex}_cf1_grid.pdf",
+                      sex=sex, dim=(2 * (ndim - 1), 2))
             save_plot(plot_estimator_grid, fitted, f"{current}_star_hat_{sex}_grid.pdf",
-                      sex=sex, scenario="CFF")
+                      sex=sex, scenario="CFF", nrows=2 * (ndim - 1))
+            # 2026-11-03: Compare individual dual values along the same factual and counterfactual paths.
+            save_plot(plot_individual_welfare, frames["individual_welfare"],
+                      f"{current}_{sex}_individual_welfare_cf.pdf",
+                      csv=True, sex=sex, beyond=beyond, forecast_start=years.stop)
 
         save_plot(plot_cf_grid, frames["joint"].iloc[1:, :], f"{current}_joint1_cf1_grid.pdf",
-                  csv=True, sex="both", dim=(3, 3), beyond=beyond,
+                  csv=True, sex="both", dim=(3, ndim), beyond=beyond,
                   forecast_start=years.stop)
         save_plot(plot_margin_counterfactuals, frames["marginal"], f"{current}_margins_CF.pdf",
                   csv=True, estimator="star", scenarios=("CFF", "CF1"),
                   beyond=beyond, forecast_start=years.stop)
-        save_plot(plot_cf_grid, frames["welfare"], f"{current}_V_cf.pdf",
-                  csv=True, sex="both", dim=(1, 1), beyond=beyond,
-                  forecast_start=years.stop)
+        # 2026-10-22: Keep contemporaneous welfare and export discounted path welfare separately.
+        for measure, _, suffix, title in welfare_measures:
+            welfare = frames_by_welfare[measure]["welfare"].rename(columns={"Welfare": title}, level="state")
+            save_plot(plot_cf_grid, welfare, f"{current}_V{suffix}_cf.pdf",
+                      csv=True, sex="both", dim=(1, 1), beyond=beyond,
+                      forecast_start=years.stop)
 
         if matchingplot:
             return
@@ -278,14 +268,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="options")
     parser.add_argument("--spec",
                         type=str,
-                        default="MS",
-                        help="Specification, one of {'Mtrend', 'MS'}.")
+                        default="MScal",
+                        choices=("Mcal", "MScal", "MScaltrend"),
+                        help="Specification to estimate or plot.")
     parser.add_argument("--train",
                         action="store_true",
                         help="Set to train the network.")
     parser.add_argument("--noload",
                         action="store_true",
-                        help="Set to overwrite pars from HuggingFace.")
+                        help="Start from fresh coefficients and network weights.")
     parser.add_argument("--lbfgs",
                         action="store_true",
                         help="Use LBFGS optim instead of Adam for outer.")
@@ -295,8 +286,5 @@ if __name__ == "__main__":
     parser.add_argument("--matchingplot",
                         action="store_true",
                         help="Run this script only to generate plots.")
-    parser.add_argument("--fixedflows",
-                        action="store_true",
-                        help="Use fixed entry/exit amounts instead of proportional exits.")
     args = parser.parse_args()
-    main(args.train, args.noload, args.lbfgs, args.neldermead, args.matchingplot, args.fixedflows)
+    main(args.train, args.noload, args.lbfgs, args.neldermead, args.matchingplot)

@@ -60,52 +60,6 @@ def scaleMcal(par, dev):
     a = torch.cat([one, torch.exp(par[2:])])
     return a, a
 
-# par = [phi_nn_0(0), phi_cc_0(0), phi_cc_1(0), Δphi_cc_0(1), Δphi_cc_1(1)]
-# where phi_mf_k(d) is utility of couples type mf for k in {0, 1} int/slope
-def tauMtrend(par, t, d, dev):
-    b_const = torch.stack((
-        mbasis(2, 0, 0, dev),
-        mbasis(2, 1, 1, dev),
-        d * mbasis(2, 1, 1, dev)))
-    b_slope = torch.stack((
-        mbasis(2, 1, 1, dev),
-        d * mbasis(2, 1, 1, dev)))
-    p_const = par[[0, 1, 3]].view(-1, 1, 1)
-    p_slope = par[[2, 4]].view(-1, 1, 1)
-    const = torch.multiply(b_const, p_const).sum(dim = 0)
-    trend = t * torch.multiply(p_slope, b_slope).sum(dim = 0)
-    return extend(const + trend)
-
-def tauMStri(par, t, d, dev):
-    b_const = torch.stack((
-        mbasis(3, 0, 0, dev),
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 2, 2, dev),
-        mbasis(3, 2, 1, dev),
-        d * mbasis(3, 0, 0, dev),
-        d * mbasis(3, 1, 1, dev),
-        d * mbasis(3, 2, 2, dev),
-        d * mbasis(3, 2, 1, dev)))
-    p_const = par[[0, 1, 2, 3, 4, 5, 6, 7]].view(-1, 1, 1)
-    const = torch.multiply(b_const, p_const).sum(dim = 0)
-    return extend(const)
-
-def tauMS(par, t, d, dev):
-    b_const = torch.stack((
-        mbasis(3, 0, 0, dev),
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 2, 2, dev),
-        mbasis(3, 2, 1, dev),
-        mbasis(3, 1, 2, dev),
-        d * mbasis(3, 0, 0, dev),
-        d * mbasis(3, 1, 1, dev),
-        d * mbasis(3, 2, 2, dev),
-        d * mbasis(3, 2, 1, dev),
-        d * mbasis(3, 1, 2, dev)))
-    p_const = par[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]].view(-1, 1, 1)
-    const = torch.multiply(b_const, p_const).sum(dim = 0)
-    return extend(const)
-
 def tauMScal(par, t, d, dev):
     b_const = torch.stack((
         mbasis(3, 0, 0, dev),
@@ -158,73 +112,6 @@ def scaleMScaltrend(par, dev):
     a = torch.cat([one, torch.exp(par[10:])])
     return a, a
 
-def tauMStrend(par, t, d, dev):
-    b_const = torch.stack((
-        mbasis(3, 0, 0, dev),
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 2, 2, dev),
-        mbasis(3, 2, 1, dev),
-        mbasis(3, 1, 2, dev),
-        d * mbasis(3, 0, 0, dev),
-        d * mbasis(3, 1, 1, dev),
-        d * mbasis(3, 2, 2, dev),
-        d * mbasis(3, 2, 1, dev),
-        d * mbasis(3, 1, 2, dev)))
-    b_slope = torch.stack((
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 2, 2, dev),
-        mbasis(3, 2, 1, dev),
-        mbasis(3, 1, 2, dev)))
-    p_const = par[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]].view(-1, 1, 1)
-    p_slope = par[[10, 11, 12, 13]].view(-1, 1, 1)
-    const = torch.multiply(b_const, p_const).sum(dim = 0)
-    trend = t * torch.multiply(p_slope, b_slope).sum(dim = 0)
-    return extend(const + trend)
-
-def tauKMS(par, t, d, dev):
-    b_const = torch.stack((
-        mbasis(8, 0, 0, dev),
-        mbasis(8, 1, 1, dev),
-        mbasis(8, 2, 2, dev),
-        mbasis(8, 3, 3, dev),
-        mbasis(8, 4, 4, dev),
-        mbasis(8, 5, 5, dev),
-        mbasis(8, 5, 4, dev),
-        mbasis(8, 6, 6, dev),
-        mbasis(8, 7, 7, dev),
-        mbasis(8, 7, 6, dev),
-        d * mbasis(8, 7, 7, dev),
-        d * mbasis(8, 7, 6, dev)))
-    idcs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-    p_const = par[idcs].view(-1, 1, 1)
-    const = torch.multiply(b_const, p_const).sum(dim = 0)
-    return extend(const)
-
-
-# takes 4 parameters (old 3x3)
-def tauMflex(par, dev):
-    b = torch.stack((
-        mbasis(3, 0, 0, dev),
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 0, 1, dev) + mbasis(3, 1, 0, dev),
-        mbasis(3, 2, 2, dev))) # by convention the last one is (c, c)
-    return extend(torch.multiply(par.view(-1, 1, 1), b).sum(dim=0))
-
-# takes 8 parameters (old 3x3)
-def tauKMsimple(par, dev):
-    b = torch.stack((
-        mbasis(6, 0, 0, dev), # znzn
-        mbasis(6, 3, 3, dev), # knkn
-        mbasis(6, 1, 1, dev), # zeze
-        mbasis(6, 4, 4, dev), # keke
-        mbasis(6, 0, 1, dev) + mbasis(6, 1, 0, dev), # znze,zezn
-        mbasis(6, 3, 4, dev) + mbasis(6, 4, 3, dev), # knke,kekn
-        mbasis(6, 2, 2, dev), # zczc
-        mbasis(6, 5, 5, dev))) # kckc
-    return extend(torch.multiply(par.view(-1, 1, 1), b).sum(dim=0))
-
-
-
 maskcM  = [[True,   False, True],
            [False,  True , True],
            [True,   True, False]]
@@ -238,20 +125,6 @@ maskcMS = [[True,  False, False, True],
            [True,  True,  True,  False]]
 masks0MS = [True, True, True, False]
 masksMS = (maskcMS, masks0MS)
-
-maskcKMS = \
-[[True,  False, False, False, False, False, False, False, True],
- [False, True,  False, False, False, False, False, False, True],
- [False, False, True,  False, False, False, False, False, True],
- [False, False, False,  True, False, False, False, False, True],
- [False, False, False, False, True,  False, False, False, True],
- [False, False, False, False, True,  True,  False, False, True],
- [False, False, False, False, False, False, True,  False, True],
- [False, False, False, False, False, False, True,  True,  True],
- [True,  True,  True,  True,  True,  True,  True,  True,  False]]
-masks0KMS = \
- [True,  True,  True,  True,  True,  True,  True,  True,  False]
-masksKMS = (maskcKMS, masks0KMS)
 
 # Function to minimize fb
 def minfb(a, b):

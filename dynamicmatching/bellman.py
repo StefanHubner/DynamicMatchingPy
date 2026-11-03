@@ -12,7 +12,7 @@ from .helpers import minfb, TermColours, ManualLRScheduler, CF, extend
 
 def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                    ng, dev, tau, scale, masks, treat_idcs, years,
-                   optim, cf, train0, calcgrad = True):
+                   optim, cf, train0, beta, calcgrad = True):
     additional_outputs = [None, None, None, None, None]
     if calcgrad:
         # 2026-10-02: Restore structural gradients when loading detached checkpoints.
@@ -20,14 +20,15 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
     def closure():
         optim.zero_grad()
         xi_params = {} if calcgrad else None
-        resid, ssh, sss, l, conds, margs, _ = match_moments(xi,
+        resid, ssh, sss, l, conds, margs, _, _ = match_moments(xi,
                                               theta,
                                               tPs, tQs, tMuHat,
                                               netflow, ng, dev,
                                               tau, scale, masks, treat_idcs,
                                               years, skiptrain=False,
                                               cf = cf, train0 = train0,
-                                              beyond = 0, xi_params = xi_params)
+                                              beyond = 0, xi_params = xi_params,
+                                              beta = beta)
         if calcgrad:
             resid.backward(inputs=(theta,))
             with torch.no_grad():
@@ -67,18 +68,22 @@ def choices_vectorised(mus, p, q, dev):
          torch.matmul(tMuF.view(-1, q.shape[1]), q.T)],
         dim=1)
 
-def incumbent_population(mus, d, p0, q0, p1, q1):
-    tMuM = mus[:,:-1,:]
-    tMuF = mus[:,:,:-1]
+def regime_transitions(d, p0, q0, p1, q1):
     alpha = d.view(-1, 1, 1, 1)
     p = (1.0 - alpha) * p0.unsqueeze(0) + alpha * p1.unsqueeze(0)
     q = (1.0 - alpha) * q0.unsqueeze(0) + alpha * q1.unsqueeze(0)
+    return p, q
+
+def incumbent_population(mus, d, p0, q0, p1, q1):
+    tMuM = mus[:,:-1,:]
+    tMuF = mus[:,:,:-1]
+    p, q = regime_transitions(d, p0, q0, p1, q1)
     M = torch.einsum('nij,nijk->nk', tMuM, p)
     F = torch.einsum('nij,nijk->nk', tMuF, q)
     return torch.cat([M, F], dim=1)
 
 def create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0, fixed=False):
-    # 2026-10-13: Keep entries fixed; calibrate exits on observed post-kernel stocks, retaining flows per sex.
+    # 2026-11-03: Apply the profile's fixed or proportional choice to both entry and exit.
     entries, exits = ee[:, 0].repeat(2), ee[:, 1].repeat(2)
     if fixed:
         return lambda s: (entries - exits).to(s)
@@ -87,10 +92,12 @@ def create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0, fixed=False):
     regimes[treat_idcs] = 1
     reference = incumbent_population(tMuHat[start:], regimes[start:],
                                      tPs[2], tQs[2], tPs[1], tQs[1]).mean(0)
-    rates = exits / reference
-    if not torch.all(torch.isfinite(rates) & (rates >= 0) & (rates <= 1)):
+    entry_rates, exit_rates = entries / reference, exits / reference
+    if not torch.all(torch.isfinite(exit_rates) & (exit_rates >= 0) & (exit_rates <= 1)):
         raise ValueError("Calibrated annual exit rates must lie between zero and one.")
-    return lambda s: entries.to(s) - rates.to(s) * s
+    if not torch.all(torch.isfinite(entry_rates) & (entry_rates >= 0)):
+        raise ValueError("Calibrated annual entry rates must be finite and nonnegative.")
+    return lambda s: (entry_rates.to(s) - exit_rates.to(s)) * s
 
 def choices(mus, t, d, p0, q0, p1, q1, netflow, dt, dev):
     Sincumb = incumbent_population(mus, d, p0, q0, p1, q1)
@@ -122,9 +129,37 @@ def matching_entropy(mus, male_margins, female_margins, scales, maskc):
     return -(entropy_c_m + entropy_c_f)
 
 
+def dual_residuals(mus, s, d, phi, scales, values, next_values,
+                   transitions, netflow, beta, maskc):
+    """Return the dynamic dual equations and value gap separately, before squaring."""
+    # 2026-11-03: Include single options and the discounted fixed-flow contribution in the dual.
+    vcur, wm, wf, J = values
+    wmnext, wfnext, Jnext = next_values
+    sigma, tau = scales
+    _, _, p0, q0, p1, q1 = transitions
+    p, q = regime_transitions(d, p0, q0, p1, q1)
+    flow = netflow(s)
+    c = 1.0 + flow.sum(dim=-1, keepdim=True)
+
+    pm = mus[:, :-1, :] / mus[:, :-1, :].sum(2, keepdim=True)
+    pf = mus[:, :, :-1] / mus[:, :, :-1].sum(1, keepdim=True)
+    am = wm.unsqueeze(2) + sigma.view(1, -1, 1) * masked_log(pm, maskc[:-1, :])
+    af = wf.unsqueeze(1) + tau.view(1, 1, -1) * masked_log(pf, maskc[:, :-1])
+    am = am - beta * torch.einsum('nijk,nk->nij', p, wmnext) / c.unsqueeze(-1)
+    af = af - beta * torch.einsum('nijk,nk->nij', q, wfnext) / c.unsqueeze(-1)
+    budget = (torch.nn.functional.pad(am, (0, 0, 0, 1))
+              + torch.nn.functional.pad(af, (0, 1, 0, 0)) - phi)
+
+    w, wnext = torch.cat([wm, wf], dim=1), torch.cat([wmnext, wfnext], dim=1)
+    source = J - beta * ((flow / c * wnext).sum(1) + Jnext)
+    # The gap is a consistency residual until the dynamic equations and tail conditions hold.
+    gap = (s * w).sum(1) + J - vcur
+    return torch.cat([budget[:, maskc], source.unsqueeze(1)], dim=1), gap
+
+
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, transitions, netflow,
-              beta, theta, tau, scale, masks, ts, dev):
+              beta, theta, tau, scale, masks, ts, dev, use_dual=True):
 
     maskc, mask0 = masks # maskc now has all information
     _, _, tP0, tQ0, tP1, tQ1 = transitions
@@ -141,11 +176,21 @@ def residuals(ng0, xi, transitions, netflow,
     rds = torch.randint(0, 2, (ng, 1), device = dev)
     st = torch.cat((s, rts, rds), dim = 1)
 
-    mus, vcur = xi(st)
-    check_mass(mus, s)
+    mus, vcur, wm, wf, J = xi(st)
     dt = ts[1] - ts[0]
     stnext = choices(mus, rts, rds, tP0, tQ0, tP1, tQ1, netflow, dt, dev)
-    _, vnext = xi(stnext)
+    # 2026-11-03: Fixed exits can exhaust a sampled type; evaluate continuation only on positive states.
+    valid = (stnext[:, :2*ndim] > 0).all(dim=1)
+    if not valid.all():
+        if not valid.any():
+            raise ValueError("No sampled states have positive next populations under additive flows.")
+        s, rts, rds = s[valid], rts[valid], rds[valid]
+        mus, vcur, wm, wf, J = [x[valid] for x in (mus, vcur, wm, wf, J)]
+        # Rebuild the continuation graph from the retained coupling tensor for the FOC.
+        stnext = choices(mus, rts, rds, tP0, tQ0, tP1, tQ1, netflow, dt, dev)
+        ng = s.shape[0]
+    check_mass(mus, s)
+    _, vnext, wmnext, wfnext, Jnext = xi(stnext)
 
     vmapper = torch.vmap(lambda t, d: tau(theta, t, d, dev), in_dims=(0, 0))
     phi0 = vmapper(rts, rds)
@@ -163,31 +208,32 @@ def residuals(ng0, xi, transitions, netflow,
     # entropym = (masked_log(mus[:,:,-1], mask0) * mus[:,:,-1]).sum(dim=1)
     # entropy = -(2 * entropyc - entropym - entropyf)
 
-    entropy = matching_entropy(mus, s[:, :ndim], s[:, ndim:(2*ndim)],
-                               scale(theta, dev), maskc)
+    scales = scale(theta, dev)
+    entropy = matching_entropy(mus, s[:, :ndim], s[:, ndim:(2*ndim)], scales, maskc)
 
     fun = unregularised + entropy
 
     sumL = torch.sum(fun + beta * vnext)
     grads = autograd_grad(outputs=sumL, inputs=mus, create_graph=True)
 
-    margs = torch.cat([mus[:,:-1,:].sum(2), mus[:,:,:-1].sum(1)], dim=1)
-
-    lambda1, lambda2, lambda3 = 1.0, 1.0, 0.0 # last part from sinkhorn
     # 2026-10-02: Eliminate current margin multipliers; retain continuation derivatives.
     g = grads[0]
     foc = g[:, :-1, :-1] - g[:, :-1, -1:] - g[:, -1:, :-1]
-    r1 = lambda1 * (foc * maskc[:-1, :-1]).square()
-    r1 = torch.nn.functional.pad(r1, (0, 1, 0, 1)).reshape(ng, -1)
-    r2 = lambda2 * torch.square((vcur - fun - beta * vnext).view(ng, 1))
-    r3 = lambda3 * torch.square(s - margs).view(ng, -1)
-
-    resid_v = torch.cat((r1, r2, r3), dim=1)
-    mean_resid_v = torch.mean(resid_v)
+    # 2026-11-03: Average four loss blocks separately; Sinkhorn margin errors remain diagnostic.
+    loss_foc = foc[:, maskc[:-1, :-1]].square().mean()
+    loss_bellman = (vcur - fun - beta * vnext).square().mean()
+    loss_dual = loss_gap = vcur.new_zeros(())
+    if use_dual:
+        dual, gap = dual_residuals(
+            mus, s, rds, phi0, scales, (vcur, wm, wf, J), (wmnext, wfnext, Jnext),
+            transitions, netflow, beta, maskc)
+        loss_dual = dual.square().mean()
+        loss_gap = gap.square().mean()
+    loss = loss_foc + loss_bellman + loss_dual + loss_gap
 
     torch.cuda.empty_cache()
 
-    return mean_resid_v
+    return loss
 
 
 def prepare_differentiable_adam(xi, loss, optimiser, xi_params):
@@ -214,7 +260,7 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
     for epoch in range(0, epochs):
         optimiser.zero_grad()
         loss = residuals(ng, xi, transitions, netflow,
-                         beta, theta, tau, scale, masks, ts, dev)
+                         beta, theta, tau, scale, masks, ts, dev, use_dual=True)
         if xi_params is not None and epoch == epochs - 1:
             optimiser = prepare_differentiable_adam(xi, loss, optimiser, xi_params)
         else:
@@ -232,11 +278,11 @@ def overallPQ(tPs, tQs, n0, n1, n2):
     return tP, tQ, tPs[2], tQs[2], tPs[1], tQs[1]
 
 def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
-                  ng, dev, tau, scale, masks, treat_idcs, years,
+                  ng, dev, tau, scale, masks, treat_idcs, years, beta,
                   skiptrain = False, cf = CF.None_, train0 = True, beyond = 0,
-                  xi_params = None):
+                  xi_params = None, bellman_welfare = False):
 
-    beta = torch.tensor(0.95, device=dev)
+    beta = torch.as_tensor(beta, device=dev)
     ts0 = torch.tensor(years, device=dev)
     ts = (ts0 - torch.min(ts0)) / (torch.max(ts0) - torch.min(ts0))
     if beyond > 0:
@@ -277,8 +323,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
                           netflow, ts[1] - ts[0], dev)
             # 2026-10-02: Evaluate next year's matching under next year's regime.
             sst = torch.cat([sst[:, :-1], next_regime], dim=1)
-            mus, vs = xi(sst)
-            return mus, vs
+            return xi(sst)
         def step_household(mus): # not in use
             raise NotImplementedError()
         def step_matching(mus): # not in use
@@ -299,23 +344,33 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     # same transition for all regimes
     xi_eval = xi if xi_params is None else lambda s: functional_call(xi, xi_params, (s,))
+    _, v, wm, wf, J = xi_eval(torch.cat([ss_hat[idx0:idx0+1], ts[idx0].view(1,1),
+                                        regime_at(idx0)], dim=1))
     walker = transition(xi_eval, tP0, tQ0, tP1, tQ1)
     regimes = ([(pre, walker)] if train0 else []) + [(treat_idcs, walker), (post, walker)] + ([(future, walker)] if beyond > 0 else [])
 
     mu_star = torch.zeros(nT+beyond, nty0, nty0).to(dev)
     v_star = torch.zeros(nT+beyond, 1).to(dev)
+    wm_star = mu_star.new_zeros(nT+beyond, nty0-1)
+    wf_star = torch.zeros_like(wm_star)
+    J_star = torch.zeros_like(v_star)
 
     for (idcs, walker) in regimes:
         for i in idcs:
             mu_star[i, :, :] = mu_cur
+            # 2026-11-03: Record current-state individual values before the shared walker advances.
+            wm_star[i, :], wf_star[i, :], J_star[i, :] = wm, wf, J
             current_regime = regime_at(i)
             next_regime = regime_at(i + 1)
-            unreg = (mu_cur * tau(theta, ts[i].view(1,1), current_regime, dev)).sum()
-            vdir = unreg + matching_entropy(
-                mu_cur, mu_cur[:, :-1, :].sum(2), mu_cur[:, :, :-1].sum(1),
-                scale(theta, dev), maskc).sum()
-            mu_cur, v = walker(mu_cur, ts[i].view(1,1), current_regime, next_regime)
-            v_star[i, :] = vdir # vs v (approximate value fct)
+            if bellman_welfare:
+                # 2026-10-22: Report current-state V before the walker advances to next year's value.
+                v_star[i, :] = v
+            else:
+                unreg = (mu_cur * tau(theta, ts[i].view(1,1), current_regime, dev)).sum()
+                v_star[i, :] = unreg + matching_entropy(
+                    mu_cur, mu_cur[:, :-1, :].sum(2), mu_cur[:, :, :-1].sum(1),
+                    scale(theta, dev), maskc).sum()
+            mu_cur, v, wm, wf, J = walker(mu_cur, ts[i].view(1,1), current_regime, next_regime)
 
     star_idcs = range(idx0, len(mu_star) - beyond)
     if beyond == 0:
@@ -333,7 +388,7 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     return (total_loss, tMuHat, mu_star, loss,
             (cond_m_hat, cond_m_star, cond_f_hat, cond_f_star),
             (m_hat, m_star, f_hat, f_star),
-            v_star)
+            v_star, (wm_star, wf_star, J_star))
 
 # earlier frobenius norm matching has a margin-mismatch component, which is controlled by the markov kernel
 # and entry/exit. as a result, being a square criterion it balances this over different cells.
