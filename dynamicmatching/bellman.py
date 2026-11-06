@@ -179,16 +179,6 @@ def residuals(ng0, xi, transitions, netflow,
     mus, vcur, wm, wf, J = xi(st)
     dt = ts[1] - ts[0]
     stnext = choices(mus, rts, rds, tP0, tQ0, tP1, tQ1, netflow, dt, dev)
-    # 2026-11-03: Fixed exits can exhaust a sampled type; evaluate continuation only on positive states.
-    valid = (stnext[:, :2*ndim] > 0).all(dim=1)
-    if not valid.all():
-        if not valid.any():
-            raise ValueError("No sampled states have positive next populations under additive flows.")
-        s, rts, rds = s[valid], rts[valid], rds[valid]
-        mus, vcur, wm, wf, J = [x[valid] for x in (mus, vcur, wm, wf, J)]
-        # Rebuild the continuation graph from the retained coupling tensor for the FOC.
-        stnext = choices(mus, rts, rds, tP0, tQ0, tP1, tQ1, netflow, dt, dev)
-        ng = s.shape[0]
     check_mass(mus, s)
     _, vnext, wmnext, wfnext, Jnext = xi(stnext)
 
@@ -219,16 +209,23 @@ def residuals(ng0, xi, transitions, netflow,
     # 2026-10-02: Eliminate current margin multipliers; retain continuation derivatives.
     g = grads[0]
     foc = g[:, :-1, :-1] - g[:, :-1, -1:] - g[:, -1:, :-1]
-    # 2026-11-03: Average four loss blocks separately; Sinkhorn margin errors remain diagnostic.
-    loss_foc = foc[:, maskc[:-1, :-1]].square().mean()
-    loss_bellman = (vcur - fun - beta * vnext).square().mean()
+    # 2026-11-06: Preserve the original padded primal denominator for all four explicit terms.
+    normalisation = (ndim + 1)**2 + 1 + 2*ndim
+    loss_foc = (foc * maskc[:-1, :-1]).square().sum((1, 2)).mean() / normalisation
+    loss_bellman = (vcur - fun - beta * vnext).square().mean() / normalisation
     loss_dual = loss_gap = vcur.new_zeros(())
     if use_dual:
+        # 2026-11-06: Restrict only the added dual equations; keep the original primal draws unchanged.
+        valid = (stnext[:, :2*ndim] > 0).all(dim=1)
+        if not valid.any():
+            raise ValueError("No sampled states have positive next populations under additive flows.")
         dual, gap = dual_residuals(
-            mus, s, rds, phi0, scales, (vcur, wm, wf, J), (wmnext, wfnext, Jnext),
+            mus[valid], s[valid], rds[valid], phi0[valid], scales,
+            tuple(x[valid] for x in (vcur, wm, wf, J)),
+            tuple(x[valid] for x in (wmnext, wfnext, Jnext)),
             transitions, netflow, beta, maskc)
-        loss_dual = dual.square().mean()
-        loss_gap = gap.square().mean()
+        loss_dual = dual.square().sum(1).mean() / normalisation
+        loss_gap = gap.square().mean() / normalisation
     loss = loss_foc + loss_bellman + loss_dual + loss_gap
 
     torch.cuda.empty_cache()
@@ -254,7 +251,7 @@ def prepare_differentiable_adam(xi, loss, optimiser, xi_params):
 def minimise_inner(xi, theta, beta, transitions, netflow,
                    ng, ts, tau, scale, masks, dev, xi_params = None):
 
-    epochs = 300
+    epochs = 600 # 2026-11-06: Allow more inner updates for the joint primal/dual solve.
     optimiser = optim.Adam(xi.parameters())  #, lr = .1) # , weight_decay = 0.01)
 
     for epoch in range(0, epochs):
