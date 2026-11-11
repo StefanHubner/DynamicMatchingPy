@@ -147,6 +147,10 @@ def main(train = False, noload = False, lbfgs = False,
             # 2026-10-02: Compare this step's evaluated pair with the separately saved best.
             best_evaluation = None
             loss = optim.step(step_closure)
+            # 2026-11-10: Failed trials have no new predictions to save or report.
+            if neldermead and best_evaluation is None:
+                print("No finite trial this step; retaining the previous best.")
+                continue
             curloss, eval_theta, eval_xi, outputs = best_evaluation or (
                 loss.cpu().detach().clone().item(), theta, xi, add_outputs)
             mush, muss, l, conds, margs = outputs
@@ -173,7 +177,7 @@ def main(train = False, noload = False, lbfgs = False,
                   end='\t', flush=True)
 
             history.loc[epoch] = [curloss, l.item()] + par.tolist()
-            history.iloc[:epoch].to_csv('training_history.csv')
+            history.iloc[:epoch].dropna(how='all').to_csv('training_history.csv')
 
         print(thetahat)
         print("Done.")

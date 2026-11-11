@@ -42,11 +42,13 @@ class NelderMeadOptimizer:
     def step(self, closure):
         # Evaluate all vertices if needed
         if len(self.f_values) < len(self.simplex):
-            self.f_values = []
-            for x in self.simplex:
+            # 2026-11-10: A shrink changes only the other vertices; retain the best score.
+            for x in self.simplex[len(self.f_values):]:
                 self._unflatten_params(x)
                 loss = closure()
                 self.f_values.append(loss.item() if torch.is_tensor(loss) else loss)
+            if not np.isfinite(self.f_values).any():
+                raise ValueError("Nelder-Mead requires at least one finite initial loss.")
 
         # Sort vertices
         indices = np.argsort(self.f_values)

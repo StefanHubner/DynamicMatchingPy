@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from copy import deepcopy
 from torch.autograd import grad as autograd_grad
 from torch.func import functional_call
 import math
@@ -19,6 +20,8 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
         theta.requires_grad_(True)
     def closure():
         optim.zero_grad()
+        # 2026-11-10: A failed Nelder-Mead trial must not change the next NN warm start.
+        xi_before = deepcopy(xi.state_dict()) if not calcgrad else None
         xi_params = {} if calcgrad else None
         resid, ssh, sss, l, conds, margs, _, _ = match_moments(xi,
                                               theta,
@@ -29,6 +32,10 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                                               cf = cf, train0 = train0,
                                               beyond = 0, xi_params = xi_params,
                                               beta = beta)
+        if not calcgrad and not torch.isfinite(resid):
+            xi.load_state_dict(xi_before)
+            print("Nonfinite trial loss; restoring previous NN weights.")
+            return resid.new_tensor(float("inf"))
         if calcgrad:
             resid.backward(inputs=(theta,))
             with torch.no_grad():
@@ -256,8 +263,9 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
 
     for epoch in range(0, epochs):
         optimiser.zero_grad()
+        # 2026-11-11: Park the dual and use the original primal objective.
         loss = residuals(ng, xi, transitions, netflow,
-                         beta, theta, tau, scale, masks, ts, dev, use_dual=True)
+                         beta, theta, tau, scale, masks, ts, dev, use_dual=False)
         if xi_params is not None and epoch == epochs - 1:
             optimiser = prepare_differentiable_adam(xi, loss, optimiser, xi_params)
         else:
