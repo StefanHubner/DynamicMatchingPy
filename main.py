@@ -47,7 +47,7 @@ def load_data(name, dev):
 
 
 def main(train=False, noload=False, neldermead=True, matchingplot=False,
-         patience=150, flows=Flows.Proportional):
+         patience=150, flows=Flows.Off):
 
     np.set_printoptions(precision=4, suppress=True)
     figures = Path("figures")
@@ -316,7 +316,7 @@ if __name__ == "__main__":
                         help="Run this script only to generate plots.")
     flow_names = [flow.value for flow in Flows]
     parser.add_argument("--flows", choices=flow_names,
-                        default=Flows.Proportional.value,
+                        default=Flows.Off.value,
                         help="Demographic entry and exit flow mode.")
     args = parser.parse_args()
     flows = Flows(args.flows)

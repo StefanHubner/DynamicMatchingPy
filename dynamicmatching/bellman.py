@@ -74,7 +74,7 @@ def incumbent_population(mus, d, p0, q0, p1, q1):
 
 
 def create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0,
-                   flows=Flows.Proportional):
+                   flows=Flows.Off):
     # Use the same demographic flow mode for entry and exit.
     entries, exits = jnp.tile(ee[:, 0], 2), jnp.tile(ee[:, 1], 2)
     start = 0 if train0 else treat_idcs[0]
