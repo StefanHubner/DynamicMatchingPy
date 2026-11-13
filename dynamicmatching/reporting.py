@@ -36,7 +36,7 @@ def format_training_step(step, max_steps, current_loss, best_loss, inner_loss,
         f" | best: {green}{number(best_loss)}{reset}"
         f" | inner current: {cyan}{number(inner_loss)}{reset}{patience_note}",
         f"{yellow}Max mass deviation (all inner updates/trials): {max_mass_deviation:.3e}{reset}",
-        f"Parameters current: {cyan}{parameters(current_theta)}{reset}"
+        f"Parameters current: {TermColours.WHITE}{parameters(current_theta)}{reset}"
         f" | best: {green}{parameters(best_theta)}{reset}",
     ]
     if conditional_diffs is not None:
