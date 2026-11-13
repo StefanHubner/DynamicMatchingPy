@@ -123,13 +123,14 @@ states and report their counts. Replaying another flow rule is not a newly solve
 equilibrium. The new additive factual path becomes invalid in 2033; other replays
 remaining valid through 2100 does not establish validity outside that horizon.
 
-## Current JAX working tree
+## JAX working tree at the time of the audit
 
 At the time of this audit, the uncommitted `jax-nelder-mead` working tree uses JAX,
 Equinox and Optax, 300 inner steps, and `fixed=False` for proportional entry **and**
 exit. Its Nelder–Mead implementation still retains the incumbent score after a
 shrink. It uses new checkpoint formats and a different backend/initialization.
 The PyTorch checkpoint comparison does not validate that migration's convergence.
+Subsequent experiment settings are recorded in [RUN_JAX.md](RUN_JAX.md).
 
 ## Reproduction and remaining provenance gaps
 

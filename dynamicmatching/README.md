@@ -5,8 +5,9 @@ Nelder–Mead for outer estimation. Dependencies install CPU-only JAX.
 See [Marshall setup and run commands](RUN_JAX.md) for the GPU install,
 current experiment settings, and run-provenance recording.
 
-The pre-dual residual construction and 300 inner steps are restored, retaining
-the dated October corrections and graph cleanup. Entry and exit both use the
+The pre-dual residual construction retains the dated October corrections and
+graph cleanup. The current experiment uses 600 inner steps, hidden layers of
+192/96 units, and 4,096 state draws per update. Entry and exit both use the
 same `create_netflow(..., fixed=False)` proportional-flow setting.
 
 `match_moments` returns its original seven outputs followed by the updated

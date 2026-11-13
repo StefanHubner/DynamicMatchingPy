@@ -8,7 +8,8 @@ to record the exact JAX revision; a branch name alone is not a run identifier.
 
 - Specification: MScal, seven structural parameters; unmarried scale fixed to 1.
 - Primal objective only; proportional **entry and exit**, in training and plots.
-- 300 inner Adam updates per trial, learning rate 0.001; 4,096 sampled states.
+- 600 inner Adam updates per trial, learning rate 0.001; 4,096 sampled states.
+- Two hidden layers of 192 and 96 units (21,614 network parameters for MScal).
 - Fresh male/female Dirichlet batches on each update; the advanced random key
   carries into the next Nelder–Mead trial.
 - Annual beta 0.95; historical window 1999–2020, initialized from observed 2001.
@@ -24,7 +25,19 @@ to record the exact JAX revision; a branch name alone is not a run identifier.
 - Progress history: `figures/training_history.csv`; save a copy after each run.
   Checkpoints are best evaluated pairs, not complete optimizer-resume states.
 
-This changes the backend, inner-step count, flow rule, and initialization from
+The larger-network experiment increases the hidden layers from 128/64 to
+192/96 and inner updates from 300 to 600, retaining 4,096 draws per update.
+The preceding configuration is recorded at commit
+`d0f9c3fa89d9d72e4f3efbf44d21304d79bbc2d6`. Start this experiment with `--noload`;
+older 128/64 `.eqx` checkpoints require a network template with their original
+dimensions. Preserve the earlier run's checkpoints and history before restarting
+if they are needed for comparison, since the output filenames are reused.
+The wider network completed a CPU smoke check with all 600 updates and eight
+synthetic states per update: loss and weights remained finite, weights stayed
+FP32, and the inner solver printed nothing. The 4,096-draw GPU memory footprint
+still needs to be checked on Marshall.
+
+This changes the backend, network width, flow rule, and initialization from
 the interrupted November PyTorch run. It is not a controlled backend-only
 replication. See the [legacy comparison record](LEGACY_COMPARISON.md).
 
@@ -100,7 +113,7 @@ step prints three coordinated lines:
 1. Current total loss in cyan, global best total in green, and current inner
    residual in cyan, plus the number of outer steps since the last best.
 2. Maximum absolute mass deviation in yellow, over both genders' type margins,
-   all accepted sampled states, all 300 inner updates, and every trial evaluated
+   all accepted sampled states, all 600 inner updates, and every trial evaluated
    in this outer step. This includes trials that were not selected as best.
 3. Current parameters in cyan and global-best parameters in green, both shown
    to three decimal places. Rounding affects display only.

@@ -77,7 +77,7 @@ class Sinkhorn(eqx.Module):
     layers: eqx.nn.Sequential
 
     def __init__(self, tau, ndim, output_dim, thetadim, key,
-                 hidden_layers=[128, 64], num_iterations=10):
+                 hidden_layers=[192, 96], num_iterations=10):
         self.ndim = ndim
         self.input_dim = 2 * ndim + 2 # margins + time + treatment
         self.output_dim = output_dim

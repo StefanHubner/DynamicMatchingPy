@@ -199,7 +199,7 @@ def residuals(ng0, xi, transitions, netflow,
 def minimise_inner(xi, theta, beta, transitions, netflow,
                    ng, ts, tau, scale, masks, dev, key, return_diagnostics=False):
 
-    epochs = 300
+    epochs = 600
     optimiser = optax.adam(0.001)
     params = xi.params
     opt_state = optimiser.init(params)
