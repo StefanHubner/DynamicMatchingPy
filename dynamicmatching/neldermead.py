@@ -77,11 +77,16 @@ class NelderMeadOptimizer:
                 self.f_values[-1] = f_reflected
         else:
             # Contraction
-            contracted = centroid + self.rho * (worst - centroid)
+            outside = f_reflected < self.f_values[-1]
+            point, bound = ((reflected, f_reflected) if outside
+                            else (worst, self.f_values[-1]))
+            contracted = centroid + self.rho * (point - centroid)
             self._unflatten_params(contracted)
             f_contracted = float(closure(contracted))
 
-            if f_contracted < self.f_values[-1]:
+            accepted = (f_contracted <= bound if outside
+                        else f_contracted < bound)
+            if accepted:
                 self.simplex[-1] = contracted
                 self.f_values[-1] = f_contracted
             else:
