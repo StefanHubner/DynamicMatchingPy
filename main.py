@@ -55,48 +55,45 @@ def main(train = False, noload = False,
 
     # Define specification and load appropriate dataset
     # outdim = network coefficient count + # of single types + value vct
-    # (data, state dim, masks, model, par dim, initial pars, years, train0)
+    # (data, state dim, masks, model, par dim, initial pars, years, train0,
+    #  network model, network pars, entry callbacks)
     current = args.spec
     theta_ms = jnp.concatenate((jnp.full(7, 0.1), psiMS()))
+    empirical = (empirical_spec, 0, no_fit_text, no_fit_report)
+    endogenous = (endogenous_entry, 1, format_entry_losses, report_entry)
 
     spec  = { "M":
                 ("M", 2, masksM, M, 4,
                  jnp.concatenate((jnp.full(3, 0.1), psiM())),
-                 range(1999, 2021), False),
+                 range(1999, 2021), False, Mcal, 3, empirical),
               "MS":
                 ("MS", 3, masksMS, MS, 11,
-                 theta_ms, range(1999, 2021), False),
+                 theta_ms, range(1999, 2021), False, MScal, 7, empirical),
               "MSentry":
                 ("MS", 3, masksMS, MS, 13,
                  jnp.concatenate((theta_ms, jnp.array([2.5, 0.0]))),
-                 range(1999, 2021), False),
+                 range(1999, 2021), False, MScal, 7, endogenous),
               "MStrend":
                 ("MS", 3, masksMS, MStrend, 16,
                  jnp.concatenate((theta_ms[:5], jnp.zeros(5), theta_ms[5:])),
-                 range(1999, 2021), False),
+                 range(1999, 2021), False, MScaltrend, 12, empirical),
               "Mcal":
                 ("M", 2, masksM, Mcal, 2+1, None,
-                 range(1999, 2021), False),
+                 range(1999, 2021), False, Mcal, 3, empirical),
               "MScal":
                 # 2026-10-02: One fixed reference scale leaves two estimated type scales.
                 ("MS", 3, masksMS, MScal, 5+2, None,
-                 range(1999, 2021), False),
+                 range(1999, 2021), False, MScal, 7, empirical),
               "MScaltrend":
                 # 2026-10-06: Fresh coefficients and zero initial slopes; all trends remain free.
                 ("MS", 3, masksMS, MScaltrend, 10+2,
                  5 * [0.1] + 5 * [0.0] + 2 * [0.1],
-                 range(1999, 2021), False)
+                 range(1999, 2021), False, MScaltrend, 12, empirical)
              }[current]
-    vars, ndim, (maskc, mask0), evaluate, thetadim, theta0, years, train0 = spec
+    (vars, ndim, (maskc, mask0), evaluate, thetadim, theta0, years, train0,
+     net_model, netdim, (entry, nentry, format_fit, report_fit)) = spec
     tau, scale = callbacks(evaluate)
-    net_model, netdim = {"M": (Mcal, 3), "MS": (MScal, 7), "MSentry": (MScal, 7),
-                         "MStrend": (MScaltrend, 12)}.get(current, (evaluate, thetadim))
     net_tau, _ = callbacks(net_model)
-    entry_specs = {
-        "MSentry": (endogenous_entry, 1, format_entry_losses, report_entry)
-    }
-    default_entry = (empirical_spec, 0, no_fit_text, no_fit_report)
-    entry, nentry, format_fit, report_fit = entry_specs.get(current, default_entry)
     outdim = netdim + 2 * ndim + 1 + nentry
     tPs, tQs, tMuHat, ee, data = load_data(vars, dev)
     entry = entry(data)
