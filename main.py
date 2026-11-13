@@ -45,8 +45,6 @@ def load_data(name, dev):
 def main(train = False, noload = False,
          neldermead = True, matchingplot = False, patience = 150):
 
-    if patience < 0:
-        raise ValueError("patience must be nonnegative; use 0 to disable early stopping")
     np.set_printoptions(precision=4, suppress=True)
     figures = Path("figures")
     figures.mkdir(exist_ok=True)
@@ -310,9 +308,8 @@ if __name__ == "__main__":
     parser.add_argument("--matchingplot",
                         action="store_true",
                         help="Run this script only to generate plots.")
-    parser.add_argument("--patience", type=int, default=150,
-                        help="Stop after this many outer steps without a new best; 0 disables (default: 150).")
     args = parser.parse_args()
-    if args.patience < 0:
-        parser.error("--patience must be nonnegative")
-    main(args.train, args.noload, args.neldermead, args.matchingplot, args.patience)
+    try:
+        main(args.train, args.noload, args.neldermead, args.matchingplot)
+    except KeyboardInterrupt:
+        print("\nStopped by Ctrl-C.", flush=True)

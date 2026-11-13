@@ -21,6 +21,7 @@ __pycache__/
 /logs/
 
 # Local project documentation
+/AGENTS.md
 /dynamicmatching/LEGACY_COMPARISON.md
 /dynamicmatching/README.md
 /dynamicmatching/RUN_JAX.md
