@@ -34,8 +34,10 @@ def entry_fit(data):
         for i, observed_p, weight in zip(periods, observed, weights):
             w = pop[i] * n[i]
             logw = np.log(w)
-            logp = np.logaddexp.reduce(logw - np.logaddexp(0, -ell[i])) - np.log(w.sum())
-            logq = np.logaddexp.reduce(logw - np.logaddexp(0, ell[i])) - np.log(w.sum())
+            logp = (np.logaddexp.reduce(logw - np.logaddexp(0, -ell[i]))
+                    - np.log(w.sum()))
+            logq = (np.logaddexp.reduce(logw - np.logaddexp(0, ell[i]))
+                    - np.log(w.sum()))
             scores.append(weight * (observed_p * (np.log(observed_p) - logp)
                           + (1 - observed_p) * (np.log1p(-observed_p) - logq)))
             rates.append((observed_p, np.exp(logp)))
@@ -50,8 +52,9 @@ def endogenous_entry(data):
         kernels = transitions[2:]
         stay = jnp.eye(kernels[0].shape[0], dtype=theta.dtype)[0]
         roles = [k[0, 0].at[0].set(0) for k in kernels]
-        delta = jnp.stack([jnp.concatenate([r / r.sum() - stay for r in roles[i:i+2]])
-                           for i in (0, 2)])
+        delta = jnp.stack([
+            jnp.concatenate([r / r.sum() - stay for r in roles[i:i+2]])
+            for i in (0, 2)])
         kernels = tuple(k.at[0, 0].set(stay) for k in kernels)
         p0, q0, p1, q1 = kernels
         kappa, s = theta[-2], jnp.exp(theta[-1])
@@ -62,8 +65,10 @@ def endogenous_entry(data):
 
         def payoff(mus, logits):
             p = jax.nn.sigmoid(logits)
-            entropy = -p * jax.nn.log_sigmoid(logits) - (1-p) * jax.nn.log_sigmoid(-logits)
+            entropy = (-p * jax.nn.log_sigmoid(logits)
+                       - (1-p) * jax.nn.log_sigmoid(-logits))
             return (mus[:, 0, 0:1] * (-kappa * p + s * entropy)).sum(axis=1)
 
-        return population, payoff, lambda logits, gain: kappa + s * logits - gain, fit
+        return (population, payoff,
+                lambda logits, gain: kappa + s * logits - gain, fit)
     return build

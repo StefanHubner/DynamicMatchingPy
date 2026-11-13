@@ -19,7 +19,8 @@ from dynamicmatching import SinkhornGeneric
 from dynamicmatching import NelderMeadOptimizer
 from dynamicmatching.reporting import load_mus, prepare_plot_frames, prepare_fit_frame, save_plot
 from dynamicmatching.reporting import sandbox_controls, show_sandbox, show_raw_matches, format_training_step
-from dynamicmatching.reporting import format_entry_losses, report_entry, no_fit_text, no_fit_report
+from dynamicmatching.reporting import (
+    format_entry_losses, report_entry, no_fit_text, no_fit_report)
 from dynamicmatching.entry import empirical_spec, endogenous_entry
 
 
@@ -133,11 +134,13 @@ def main(train = False, noload = False,
                                               tPs, tQs, tMuHat, netflow,
                                               ng, dev, tau, scale, masks,
                                               treat_idcs, years, optim,
-                                              CF.None_, train0, beta, key=key, entry=entry)
+                                              CF.None_, train0, beta,
+                                              key=key, entry=entry)
         np.set_printoptions(precision=5, suppress=True)
 
         columns = (['loss', 'l'] + [f'theta{i}' for i in range(thetadim)]
-                   + ['inner_min_step', 'inner_steps', 'matching_kl', 'entry_kl'])
+                   + ['inner_min_step', 'inner_steps',
+                      'matching_kl', 'entry_kl'])
         history = pd.DataFrame(index=np.arange(1, num_epochs+1),
                                columns=columns)
 
@@ -185,10 +188,11 @@ def main(train = False, noload = False,
             report = message + format_fit(inner_diagnostics)
             print(report, flush=True)
 
-            history.loc[epoch] = ([curloss, float(l)] + par.tolist()
-                                  + [inner_min_step or np.nan, inner_steps or np.nan,
-                                     inner_diagnostics.get('matching_kl', np.nan),
-                                     inner_diagnostics.get('entry_kl', np.nan)])
+            history.loc[epoch] = (
+                [curloss, float(l)] + par.tolist()
+                + [inner_min_step or np.nan, inner_steps or np.nan,
+                   inner_diagnostics.get('matching_kl', np.nan),
+                   inner_diagnostics.get('entry_kl', np.nan)])
             history.iloc[:epoch].to_csv(figures / 'training_history.csv')
 
             if not best_epoch:
@@ -270,7 +274,8 @@ def main(train = False, noload = False,
         sandbox, process, raw = st.tabs(["Sandbox", "Matched Processes", "Raw"])
 
         with sandbox:
-            show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt, entry=entry)
+            show_sandbox(xi, theta, tau, ndim, controls, transitions,
+                         netflow, dt, entry=entry)
 
         with process:
             myears = np.asarray([train0 for _ in range(treat_idcs[0])]

@@ -414,20 +414,24 @@ q_post = bodge_trans(trans("women", 3)).numpy()
 
 eehat = (torch.tensor(eeagg3.values) / torch.tensor(ns).mean()).to(dtype=torch.float32).numpy()
 
+
 def entry_counts(p):
     ix = p.index
     uu = ((ix.get_level_values('COMB') // 1000000000 != 3)
           & (ix.get_level_values('mar') == 'unmarried')
           & (ix.get_level_values('mar_p') == 'unmarried'))
     counts = p.loc[uu].sum()
-    return counts.sum(), counts[counts.index.get_level_values(2) == 'current'].sum()
+    return (counts.sum(),
+            counts[counts.index.get_level_values(2) == 'current'].sum())
+
 
 counts = np.array([[entry_counts(trans(sex, i)) for sex in ("men", "women")]
                    for i in (1, 2, 3)])
 entry = {"source": file_path,
          "transition_coverage": "Regime totals; annual exposure unavailable",
          "years": years.tolist(), "population": ns,
-         "eligible": counts[:, :, 0].tolist(), "entered": counts[:, :, 1].tolist()}
+         "eligible": counts[:, :, 0].tolist(),
+         "entered": counts[:, :, 1].tolist()}
 
 MSnew = Dataset.from_dict({'p': [np.stack([p_pre, p, p_post])],
                            'q': [np.stack([q_pre, q, q_post])],
@@ -450,7 +454,8 @@ metadata = Dataset.from_dict({"entry": [entry]})
 schema = dataset_dict["MS"].features | metadata.features
 features = Features(schema)
 dataset_dict = DatasetDict({
-    name: ds.map(lambda _: {"entry": {"MS": entry}.get(name)}, features=features)
+    name: ds.map(lambda _: {"entry": {"MS": entry}.get(name)},
+                 features=features)
     for name, ds in dataset_dict.items()})
 
 

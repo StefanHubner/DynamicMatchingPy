@@ -6,7 +6,8 @@ import streamlit as st
 import jax.numpy as jnp
 import numpy as np
 
-from .bellman import choices, conditional_kl_loss, match_moments, incumbent_population
+from .bellman import (choices, conditional_kl_loss, match_moments,
+                      incumbent_population)
 from .entry import empirical_entry, entry_mass
 from .graphs import create_heatmap, plot_cf_grid, plot_estimator_grid
 from .helpers import TermColours
@@ -147,12 +148,12 @@ def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
              scale, masks, tis, years, cf, train0, beyond, beta,
              bellman_welfare=False, welfare_horizon=0, entry=empirical_entry):
     tail = max(welfare_horizon - 1, 0)
-    _, muh1, mus, _, conds, margs, vs, _, _, diagnostics, logits = match_moments(xi, theta,
-                                        tPs, tQs, muh, netflow, ng,
-                                        dev, tau, scale, masks, tis, years,
-                                        skiptrain = True, cf = cf,
-                                        train0 = train0, beyond = beyond + tail,
-                                        bellman_welfare = bellman_welfare, beta=beta, entry=entry)
+    (_, muh1, mus, _, conds, margs, vs, _, _,
+     diagnostics, logits) = match_moments(
+        xi, theta, tPs, tQs, muh, netflow, ng,
+        dev, tau, scale, masks, tis, years,
+        skiptrain=True, cf=cf, train0=train0, beyond=beyond + tail,
+        bellman_welfare=bellman_welfare, beta=beta, entry=entry)
     if welfare_horizon:
         start, stop = (0 if train0 else tis[0]), len(muh) + beyond
         mus = mus[:stop]
@@ -183,7 +184,8 @@ def prepare_plot_frames(results, years, treat_idcs, train0, beyond):
     columns = {name: {} for name in ("conditional", "marginal", "joint", "welfare")}
     start = 0 if train0 else treat_idcs[0]
     labels = [str(year) for year in range(years.start + start, years.stop + beyond)]
-    for scenario, (_, mu_star, conditional, marginal, welfare, _, _) in results.items():
+    for scenario, (_, mu_star, conditional, marginal,
+                   welfare, _, _) in results.items():
         ndim = mu_star.shape[1] - 1
         for name, tensors, states in (("conditional", conditional, CONDITIONAL_STATES[ndim]),
                                       ("marginal", marginal, MARGINAL_STATES[ndim])):
@@ -234,7 +236,8 @@ def report_entry(results, years, start, beyond, prefix):
     save_plot(plot_estimator_grid, fitted, f"{prefix}_entry_fit.pdf", csv=True,
               sex="both", nrows=1, ncols=1)
     _, _, _, _, _, _, rates = results["CFF"]
-    table = pd.DataFrame(rates, index=fitted.index, columns=['Entry observed', 'Entry fitted'])
+    table = pd.DataFrame(rates, index=fitted.index,
+                         columns=['Entry observed', 'Entry fitted'])
     print(table)
 
 
@@ -297,7 +300,8 @@ def sandbox_controls(spec, years):
     return dict(SANDBOX_LAYOUTS[spec], ss=ss, t=s.t)
 
 
-def show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt, entry=empirical_entry):
+def show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt,
+                 entry=empirical_entry):
     ss, t = controls["ss"], controls["t"]
     hdmu, hds = controls["hdmu"], controls["hds"]
     _, _, tP0, tQ0, tP1, tQ1 = transitions
@@ -305,8 +309,8 @@ def show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt, entry
     zero = jnp.array(0.0).reshape(1, 1)
     matches, values, next_states = [], [], []
     for regime, d in enumerate((zero, zero + 1)):
-        st = ss(regime)
-        mus, v, logits = xi.policy(xi.params, st)
+        state = ss(regime)
+        mus, v, logits = xi.policy(xi.params, state)
         matches.append(mus)
         values.append(v)
         e = entry_mass(matches[0], logits)
