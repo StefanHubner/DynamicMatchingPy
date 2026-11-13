@@ -146,7 +146,8 @@ def main(train = False, noload = False,
                                               CF.None_, train0, beta, key=key)
         np.set_printoptions(precision=5, suppress=True)
 
-        columns = ['loss', 'l'] + [f'theta{i}' for i in range(thetadim)]
+        columns = (['loss', 'l'] + [f'theta{i}' for i in range(thetadim)]
+                   + ['inner_min_step', 'inner_steps'])
         history = pd.DataFrame(index=np.arange(1, num_epochs+1),
                                columns=columns)
 
@@ -156,6 +157,7 @@ def main(train = False, noload = False,
             # 2026-10-02: Compare this step's evaluated pair with the separately saved best.
             add_outputs[6] = None
             add_outputs[7] = 0.0
+            add_outputs[8] = None
             optim.step(closure)
             evaluated = add_outputs[6]
             if evaluated is None:
@@ -167,6 +169,10 @@ def main(train = False, noload = False,
                 mush, muss, l, conds, margs = outputs
                 cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
                 par = np.asarray(eval_theta).flatten()
+
+            inner_diagnostics = add_outputs[8] or {}
+            inner_min_step = inner_diagnostics.get('inner_min_step')
+            inner_steps = inner_diagnostics.get('inner_steps')
 
             improved = evaluated is not None and curloss < losshat
             if improved:
@@ -184,9 +190,11 @@ def main(train = False, noload = False,
                 losshat if best_epoch else None, float(l) if evaluated is not None else None,
                 par if evaluated is not None else None, thetahat if best_epoch else None,
                 add_outputs[7], conditional_diffs=diffs,
-                steps_without_improvement=epoch - best_epoch, patience=patience), flush=True)
+                steps_without_improvement=epoch - best_epoch, patience=patience,
+                inner_min_step=inner_min_step, inner_steps=inner_steps), flush=True)
 
-            history.loc[epoch] = [curloss, float(l)] + par.tolist()
+            history.loc[epoch] = ([curloss, float(l)] + par.tolist()
+                                  + [inner_min_step or np.nan, inner_steps or np.nan])
             history.iloc[:epoch].to_csv(figures / 'training_history.csv')
 
             if not best_epoch:

@@ -14,7 +14,7 @@ from .helpers import TermColours
 def format_training_step(step, max_steps, current_loss, best_loss, inner_loss,
                          current_theta, best_theta, max_mass_deviation,
                          *, conditional_diffs=None, steps_without_improvement=0,
-                         patience=0):
+                         patience=0, inner_min_step=None, inner_steps=None):
     """One coordinated outer-step report; details appear only for a new best."""
     def number(value):
         return "n/a" if value is None else f"{value:.10g}"
@@ -31,11 +31,13 @@ def format_training_step(step, max_steps, current_loss, best_loss, inner_loss,
                                        TermColours.RESET)
     patience_note = (f" | since best: {steps_without_improvement}/{patience}"
                      if patience else "")
+    minimum_at = f"{inner_min_step}/{inner_steps}" if inner_min_step else "n/a"
     lines = [
         f"Step {step}/{max_steps} | total current: {cyan}{number(current_loss)}{reset}"
         f" | best: {green}{number(best_loss)}{reset}"
         f" | inner current: {cyan}{number(inner_loss)}{reset}{patience_note}",
-        f"{yellow}Max mass deviation (all inner updates/trials): {max_mass_deviation:.3e}{reset}",
+        f"{yellow}Max mass deviation (all inner updates/trials): {max_mass_deviation:.3e}{reset}"
+        f" | {TermColours.BLUE}Inner min at: {minimum_at}{reset}",
         f"Parameters current: {TermColours.WHITE}{parameters(current_theta)}{reset}"
         f" | best: {green}{parameters(best_theta)}{reset}",
     ]

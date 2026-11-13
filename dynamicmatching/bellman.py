@@ -13,7 +13,7 @@ from .helpers import minfb, TermColours, ManualLRScheduler, CF, extend
 def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                    ng, dev, tau, scale, masks, treat_idcs, years,
                    optim, cf, train0, beta, key):
-    additional = [None, None, None, None, None, xi, None, 0.0]
+    additional = [None, None, None, None, None, xi, None, 0.0, None]
     def closure(candidate_theta):
         nonlocal xi, key
         diagnostics = {}
@@ -36,6 +36,7 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
         if np.isfinite(value) and value < (best[0] if best else float("inf")):
             additional[6] = (value, candidate_theta, xi,
                                      (ssh, sss, l, conds, margs))
+            additional[8] = diagnostics.copy()
         return resid
     return closure, additional
 
@@ -195,6 +196,11 @@ def residuals(ng0, xi, transitions, netflow,
     return mean_resid_v
 
 
+def inner_loss_minimum_step(losses):
+    """First minimum's 1-based, pre-update batch index; 0 for a nonfinite trace."""
+    return jnp.where(jnp.all(jnp.isfinite(losses)), jnp.argmin(losses) + 1, 0)
+
+
 @eqx.filter_jit
 def minimise_inner(xi, theta, beta, transitions, netflow,
                    ng, ts, tau, scale, masks, dev, key, return_diagnostics=False):
@@ -219,7 +225,9 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
         step, (params, opt_state, key), jnp.arange(epochs))
     result = (losses[-1], xi.with_params(params), key)
     if return_diagnostics:
-        return (*result, mass_errors.max())
+        return (*result, {"max_mass_deviation": mass_errors.max(),
+                          "inner_min_step": inner_loss_minimum_step(losses),
+                          "inner_steps": epochs})
     return result
 
 def overallPQ(tPs, tQs, n0, n1, n2):
@@ -253,11 +261,15 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     if not skiptrain:
         xi = xi.train()
-        loss, xi, key, mass_max = minimise_inner(xi, theta, beta, transitions, netflow,
+        loss, xi, key, inner_diagnostics = minimise_inner(xi, theta, beta, transitions, netflow,
                                       ng, ts, tau, scale, masks, dev, key,
                                       return_diagnostics=True)
         if diagnostics is not None:
-            diagnostics["max_mass_deviation"] = float(mass_max)
+            inner_diagnostics = jax.device_get(inner_diagnostics)
+            diagnostics.update(
+                max_mass_deviation=float(inner_diagnostics["max_mass_deviation"]),
+                inner_min_step=int(inner_diagnostics["inner_min_step"]),
+                inner_steps=int(inner_diagnostics["inner_steps"]))
     else:
         loss = jnp.asarray(0.0, dtype=theta.dtype)
 
