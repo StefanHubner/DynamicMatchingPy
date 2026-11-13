@@ -99,7 +99,6 @@ def main(train=False, noload=False, neldermead=True, matchingplot=False,
     tPs, tQs, tMuHat, ee, data = load_data(vars, dev)
     entry = entry(data)
     treat_idcs = [i for i, t in enumerate(years) if 2001 <= t <= 2008]
-    fixedflows = flows == Flows.Additive
     netflow = create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0,
                              flows=flows)
     masks = (jax.device_put(jnp.asarray(maskc, dtype=bool), dev),
@@ -221,10 +220,11 @@ def main(train=False, noload=False, neldermead=True, matchingplot=False,
 
         # 2026-10-12: Keep the reporting workflow here; preparation and display details live in reporting.py.
         # 2026-10-13: Keep shorter fixed-flow windows; proportional flows use the full horizon.
-        beyond = {"MScal": 12, "MScaltrend": 16}.get(current, 20) if fixedflows else 20
+        beyond = ({"MScal": 12, "MScaltrend": 16}.get(current, 20)
+                  if flows == Flows.Additive else 20)
         scenarios = {"CFF": CF.None_, "CF0": CF.HighCost, "CF1": CF.LowCost}
         welfare_measures = [("flow", 0, "", "Welfare")]
-        if not fixedflows:
+        if flows != Flows.Additive:
             welfare_measures.append(("discounted", 1000, "_discounted", "Discounted welfare"))
         results_by_welfare = {}
         for measure, horizon, _, _ in welfare_measures:
