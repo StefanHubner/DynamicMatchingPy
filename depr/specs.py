@@ -2,18 +2,26 @@
 
 import jax.numpy as jnp
 from dynamicmatching.helpers import (
-    masksM, masksMS, masksKMS, tauMcal, tauMScal, tauMStrend, tauMScaltrend,
-    tauMStri, tauKMS, scaleMcal, scaleMScaltrend,
+    masksM, masksMS, masksKMS, Mcal, MScal, MScaltrend, callbacks,
+    tauM, tauMS, tauMStri, tauKMS,
 )
 
 tpl = lambda a: (a, a)
 scale1 = lambda d: lambda _, dev: tpl(jnp.ones(d, dtype=jnp.float32))
+tauMcal, _ = callbacks(Mcal)
+tauMScal, _ = callbacks(MScal)
+tauMScaltrend, scaleMScaltrend = callbacks(MScaltrend)
+
+def tauMtrend(p, t, d, dev):
+    levels = p[:2] + jnp.squeeze(t) * jnp.array([0, p[2]])
+    return tauM(levels, p[3:4] + jnp.squeeze(t)*p[4:5], d)
+
+def tauMStrend(p, t, d, dev):
+    levels = p[:5] + jnp.concatenate((jnp.squeeze(d)*p[5:6], jnp.squeeze(t)*p[10:14]))
+    return tauMS(levels, p[6:10], d)
 
 specs = { "Mcal1":
             ("M", 2, masksM, tauMcal, scale1(2), 2, None,
-             range(1999, 2021), False),
-          "Mcal":
-            ("M", 2, masksM, tauMcal, scaleMcal, 2+1, None,
              range(1999, 2021), False),
           "MStrend":
             ("MS", 3, masksMS, tauMStrend, scale1(3), 14, None,

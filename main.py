@@ -12,8 +12,8 @@ from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 
 from dynamicmatching import create_closure, create_netflow, overallPQ
-from dynamicmatching import tauMS, tauMScal, tauMScaltrend
-from dynamicmatching import scaleMScal, scaleMScaltrend, masksMS, CF
+from dynamicmatching import M, MS, MStrend, Mcal, MScal, MScaltrend, callbacks
+from dynamicmatching import psiM, psiMS, masksM, masksMS, CF
 from dynamicmatching import matched_process_plot, plot_cf_grid, plot_estimator_grid, plot_margin_counterfactuals
 from dynamicmatching import SinkhornGeneric
 from dynamicmatching import NelderMeadOptimizer
@@ -53,30 +53,39 @@ def main(train = False, noload = False,
 
     # Define specification and load appropriate dataset
     # outdim = network coefficient count + # of single types + value vct
-    # (data, state dim, masks, surplus, scales, par dim, initial pars, years, train0)
+    # (data, state dim, masks, model, par dim, initial pars, years, train0)
     current = args.spec
-    repar = lambda f, g: lambda p, *a: f(g(p), *a)
-    psi = tauMScal(jnp.zeros(7), 0, 1, dev)
-    psi = psi[jnp.array([1, 2, 2, 1]), jnp.array([1, 2, 1, 2])]
+    theta_ms = jnp.concatenate((jnp.full(7, 0.1), psiMS()))
 
-    spec  = { "MS":
-                ("MS", 3, masksMS,
-                 repar(tauMS, lambda p: jnp.concatenate((p[:5], jnp.zeros_like(p[:1]), p[7:]))),
-                 repar(scaleMScal, lambda p: p[:7]), 11,
-                 jnp.concatenate((jnp.full(7, 0.1), psi)),
+    spec  = { "M":
+                ("M", 2, masksM, M, 4,
+                 jnp.concatenate((jnp.full(3, 0.1), psiM())),
+                 range(1999, 2021), False),
+              "MS":
+                ("MS", 3, masksMS, MS, 11,
+                 theta_ms, range(1999, 2021), False),
+              "MStrend":
+                ("MS", 3, masksMS, MStrend, 16,
+                 jnp.concatenate((theta_ms[:5], jnp.zeros(5), theta_ms[5:])),
+                 range(1999, 2021), False),
+              "Mcal":
+                ("M", 2, masksM, Mcal, 2+1, None,
                  range(1999, 2021), False),
               "MScal":
                 # 2026-10-02: One fixed reference scale leaves two estimated type scales.
-                ("MS", 3, masksMS, tauMScal, scaleMScal, 5+2, None,
+                ("MS", 3, masksMS, MScal, 5+2, None,
                  range(1999, 2021), False),
               "MScaltrend":
                 # 2026-10-06: Fresh coefficients and zero initial slopes; all trends remain free.
-                ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2,
+                ("MS", 3, masksMS, MScaltrend, 10+2,
                  5 * [0.1] + 5 * [0.0] + 2 * [0.1],
                  range(1999, 2021), False)
              }[current]
-    vars, ndim, (maskc, mask0), tau, scale, thetadim, theta0, years, train0 = spec
-    net_tau, netdim = {"MS": (tauMScal, 7)}.get(current, (tau, thetadim))
+    vars, ndim, (maskc, mask0), evaluate, thetadim, theta0, years, train0 = spec
+    tau, scale = callbacks(evaluate)
+    net_model, netdim = {"M": (Mcal, 3), "MS": (MScal, 7),
+                         "MStrend": (MScaltrend, 12)}.get(current, (evaluate, thetadim))
+    net_tau, _ = callbacks(net_model)
     outdim = netdim + 2 * ndim + 1
     tPs, tQs, tMuHat, ee = load_data(vars, dev)
     treat_idcs = [i for i, t in enumerate(years) if 2001 <= t <= 2008]

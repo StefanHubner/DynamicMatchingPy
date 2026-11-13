@@ -44,36 +44,43 @@ def mbasis(n, i, j, dev):
     b = b.at[i,j].set(1)
     return b
 
-def tauMcal(par, t, d, dev):
-    b = jnp.stack((
-        mbasis(2, 0, 0, dev),
-        mbasis(2, 1, 1, dev),
-        d * mbasis(2, 1, 1, dev)))
-    psi = -jnp.log(jnp.asarray([1.1], dtype=jnp.float32)) # theoretical 1.1 hazard ratio at cutoff
-    p = jnp.concatenate([ par[:2], psi ]).reshape(-1, 1, 1)
-    const = jnp.multiply(b, p).sum(axis = 0)
-    return extend(const)
+def surplus(n, cells):
+    def tau(levels, psi, d):
+        b = jnp.stack([mbasis(n, i, j, None) for i, j in cells])
+        p = levels + jnp.concatenate((jnp.zeros_like(levels[:1]), jnp.squeeze(d) * psi))
+        return extend((b * p[:, None, None]).sum(axis=0))
+    return tau
 
-def scaleMcal(par, dev):
-    one = jnp.ones(1, dtype=jnp.float32)
-    a = jnp.concatenate([one, jnp.exp(par[2:])])
+tauM = surplus(2, ((0, 0), (1, 1)))
+tauMS = surplus(3, ((0, 0), (1, 1), (2, 2), (2, 1), (1, 2)))
+
+def scales(log_scales):
+    one = jnp.ones(1, dtype=log_scales.dtype)
+    a = jnp.concatenate((one, jnp.exp(log_scales)))
     return a, a
 
-# par = [phi_nn_0(0), phi_cc_0(0), phi_cc_1(0), Δphi_cc_0(1), Δphi_cc_1(1)]
-# where phi_mf_k(d) is utility of couples type mf for k in {0, 1} int/slope
-def tauMtrend(par, t, d, dev):
-    b_const = jnp.stack((
-        mbasis(2, 0, 0, dev),
-        mbasis(2, 1, 1, dev),
-        d * mbasis(2, 1, 1, dev)))
-    b_slope = jnp.stack((
-        mbasis(2, 1, 1, dev),
-        d * mbasis(2, 1, 1, dev)))
-    p_const = par[jnp.asarray([0, 1, 3])].reshape(-1, 1, 1)
-    p_slope = par[jnp.asarray([2, 4])].reshape(-1, 1, 1)
-    const = jnp.multiply(b_const, p_const).sum(axis = 0)
-    trend = t * jnp.multiply(p_slope, b_slope).sum(axis = 0)
-    return extend(const + trend)
+def model(tau, unpack):
+    def evaluate(theta, t, d):
+        levels, psi, log_scales = unpack(theta, jnp.squeeze(t))
+        return tau(levels, psi, d), scales(log_scales)
+    return evaluate
+
+def callbacks(spec):
+    return (lambda p, t, d, dev: spec(p, t, d)[0],
+            lambda p, dev: spec(p, 0, 0)[1])
+
+def calibration(rf):
+    return lambda: -jnp.log(jnp.asarray(rf, dtype=jnp.float32))
+
+psiM = calibration((1.1,)) # theoretical hazard ratio at cutoff
+psiMS = calibration((0.046/0.035, 0.18/0.155, 1.0, 1.0))
+
+M = model(tauM, lambda p, t: (p[:2], p[3:4], p[2:3]))
+Mcal = model(tauM, lambda p, t: (p[:2], psiM(), p[2:3]))
+MS = model(tauMS, lambda p, t: (p[:5], p[7:11], p[5:7]))
+MScal = model(tauMS, lambda p, t: (p[:5], psiMS(), p[5:7]))
+MStrend = model(tauMS, lambda p, t: (p[:5] + t*p[5:10], p[12:16], p[10:12]))
+MScaltrend = model(tauMS, lambda p, t: (p[:5] + t*p[5:10], psiMS(), p[10:12]))
 
 def tauMStri(par, t, d, dev):
     b_const = jnp.stack((
@@ -88,97 +95,6 @@ def tauMStri(par, t, d, dev):
     p_const = par[:8].reshape(-1, 1, 1)
     const = jnp.multiply(b_const, p_const).sum(axis = 0)
     return extend(const)
-
-def tauMS(par, t, d, dev):
-    b_const = jnp.stack((
-        mbasis(3, 0, 0, dev),
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 2, 2, dev),
-        mbasis(3, 2, 1, dev),
-        mbasis(3, 1, 2, dev),
-        d * mbasis(3, 0, 0, dev),
-        d * mbasis(3, 1, 1, dev),
-        d * mbasis(3, 2, 2, dev),
-        d * mbasis(3, 2, 1, dev),
-        d * mbasis(3, 1, 2, dev)))
-    p_const = par[:10].reshape(-1, 1, 1)
-    const = jnp.multiply(b_const, p_const).sum(axis = 0)
-    return extend(const)
-
-def tauMScal(par, t, d, dev):
-    b_const = jnp.stack((
-        mbasis(3, 0, 0, dev),
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 2, 2, dev),
-        mbasis(3, 2, 1, dev),
-        mbasis(3, 1, 2, dev),
-        d * mbasis(3, 1, 1, dev),
-        d * mbasis(3, 2, 2, dev),
-        d * mbasis(3, 2, 1, dev),
-        d * mbasis(3, 1, 2, dev)))
-    rf = [0.046/0.035, 0.18/0.155, 1.0, 1.0] # odds ratio
-    psi = -jnp.log(jnp.asarray(rf, dtype=jnp.float32))
-    p_const = jnp.concatenate([ par[:5], psi ]).reshape(-1, 1, 1)
-    const = jnp.multiply(b_const, p_const).sum(axis = 0)
-    return extend(const)
-
-def scaleMScal(par, dev):
-    one = jnp.ones(1, dtype=jnp.float32)
-    a = jnp.concatenate([one, jnp.exp(par[5:])])
-    return a, a
-
-def tauMScaltrend(par, t, d, dev):
-    b_const = jnp.stack((
-        mbasis(3, 0, 0, dev),
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 2, 2, dev),
-        mbasis(3, 2, 1, dev),
-        mbasis(3, 1, 2, dev),
-        d * mbasis(3, 1, 1, dev),
-        d * mbasis(3, 2, 2, dev),
-        d * mbasis(3, 2, 1, dev),
-        d * mbasis(3, 1, 2, dev)))
-    b_slope = jnp.stack((
-        mbasis(3, 0, 0, dev),
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 2, 2, dev),
-        mbasis(3, 2, 1, dev),
-        mbasis(3, 1, 2, dev)))
-    rf = [0.046/0.035, 0.18/0.155, 1.0, 1.0] # odds ratios
-    psi = -jnp.log(jnp.asarray(rf, dtype=jnp.float32))
-    p_const = jnp.concatenate([ par[:5], psi ]).reshape(-1, 1, 1)
-    p_slope = par[5:10].reshape(-1, 1, 1)
-    const = jnp.multiply(b_const, p_const).sum(axis = 0)
-    trend = t * jnp.multiply(p_slope, b_slope).sum(axis = 0)
-    return extend(const + trend)
-
-def scaleMScaltrend(par, dev):
-    one = jnp.ones(1, dtype=jnp.float32)
-    a = jnp.concatenate([one, jnp.exp(par[10:])])
-    return a, a
-
-def tauMStrend(par, t, d, dev):
-    b_const = jnp.stack((
-        mbasis(3, 0, 0, dev),
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 2, 2, dev),
-        mbasis(3, 2, 1, dev),
-        mbasis(3, 1, 2, dev),
-        d * mbasis(3, 0, 0, dev),
-        d * mbasis(3, 1, 1, dev),
-        d * mbasis(3, 2, 2, dev),
-        d * mbasis(3, 2, 1, dev),
-        d * mbasis(3, 1, 2, dev)))
-    b_slope = jnp.stack((
-        mbasis(3, 1, 1, dev),
-        mbasis(3, 2, 2, dev),
-        mbasis(3, 2, 1, dev),
-        mbasis(3, 1, 2, dev)))
-    p_const = par[:10].reshape(-1, 1, 1)
-    p_slope = par[10:14].reshape(-1, 1, 1)
-    const = jnp.multiply(b_const, p_const).sum(axis = 0)
-    trend = t * jnp.multiply(p_slope, b_slope).sum(axis = 0)
-    return extend(const + trend)
 
 def tauKMS(par, t, d, dev):
     b_const = jnp.stack((
