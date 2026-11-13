@@ -129,7 +129,7 @@ def main(train = False, noload = False,
     if load:
         network = eqx.tree_deserialise_leaves(f("xi"), network)
     xi = network.with_params(jax.device_put(network.params, dev))
-    ng = 2**13 # 8,192 Dirichlet state draws per inner update
+    ng = 2**14 # 16,384 Dirichlet state draws per inner update
     xihat, thetahat, losshat = xi, theta, float("inf")
 
     optim = NelderMeadOptimizer([theta], lr = 0.3)
