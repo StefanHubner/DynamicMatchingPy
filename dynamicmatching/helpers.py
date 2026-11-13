@@ -6,6 +6,13 @@ class CF(Enum):
     HighCost = 1
     LowCost = 2
 
+
+class Flows(Enum):
+    Additive = "additive"
+    Proportional = "proportional"
+    Off = "off"
+
+
 class TermColours:
     BLACK   = "\033[30m"
     RED     = "\033[31m"
@@ -81,6 +88,11 @@ MS = model(tauMS, lambda p, t: (p[:5], p[7:11], p[5:7]))
 MScal = model(tauMS, lambda p, t: (p[:5], psiMS(), p[5:7]))
 MStrend = model(tauMS, lambda p, t: (p[:5] + t*p[5:10], p[12:16], p[10:12]))
 MScaltrend = model(tauMS, lambda p, t: (p[:5] + t*p[5:10], psiMS(), p[10:12]))
+
+netM, _ = callbacks(Mcal)
+netMS, _ = callbacks(MScal)
+netMStrend, _ = callbacks(MScaltrend)
+
 
 def tauMStri(par, t, d, dev):
     b_const = jnp.stack((

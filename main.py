@@ -13,6 +13,7 @@ from huggingface_hub import hf_hub_download
 
 from dynamicmatching import create_closure, create_netflow, overallPQ
 from dynamicmatching import M, MS, MStrend, Mcal, MScal, MScaltrend, callbacks
+from dynamicmatching import netM, netMS, netMStrend, Flows
 from dynamicmatching import psiM, psiMS, masksM, masksMS, CF
 from dynamicmatching import matched_process_plot, plot_cf_grid, plot_estimator_grid, plot_margin_counterfactuals
 from dynamicmatching import SinkhornGeneric
@@ -45,8 +46,8 @@ def load_data(name, dev):
     return tPs, tQs, tMuHat, ee, data[0]
 
 
-def main(train = False, noload = False,
-         neldermead = True, matchingplot = False, patience = 150):
+def main(train=False, noload=False, neldermead=True, matchingplot=False,
+         patience=150, flows=Flows.Proportional):
 
     np.set_printoptions(precision=4, suppress=True)
     figures = Path("figures")
@@ -57,7 +58,7 @@ def main(train = False, noload = False,
     # Define specification and load appropriate dataset
     # outdim = network coefficient count + # of single types + value vct
     # (data, state dim, masks, model, par dim, initial pars, years, train0,
-    #  network model, network pars, entry callbacks)
+    #  network map, network pars, entry callbacks)
     current = args.spec
     theta_ms = jnp.concatenate((jnp.full(7, 0.1), psiMS()))
     empirical = (empirical_spec, 0, no_fit_text, no_fit_report)
@@ -66,41 +67,41 @@ def main(train = False, noload = False,
     spec  = { "M":
                 ("M", 2, masksM, M, 4,
                  jnp.concatenate((jnp.full(3, 0.1), psiM())),
-                 range(1999, 2021), False, Mcal, 3, empirical),
+                 range(1999, 2021), False, netM, 3, empirical),
               "MS":
                 ("MS", 3, masksMS, MS, 11,
-                 theta_ms, range(1999, 2021), False, MScal, 7, empirical),
+                 theta_ms, range(1999, 2021), False, netMS, 7, empirical),
               "MSentry":
                 ("MS", 3, masksMS, MS, 13,
                  jnp.concatenate((theta_ms, jnp.array([2.5, 0.0]))),
-                 range(1999, 2021), False, MScal, 7, endogenous),
+                 range(1999, 2021), False, netMS, 7, endogenous),
               "MStrend":
                 ("MS", 3, masksMS, MStrend, 16,
                  jnp.concatenate((theta_ms[:5], jnp.zeros(5), theta_ms[5:])),
-                 range(1999, 2021), False, MScaltrend, 12, empirical),
+                 range(1999, 2021), False, netMStrend, 12, empirical),
               "Mcal":
                 ("M", 2, masksM, Mcal, 2+1, None,
-                 range(1999, 2021), False, Mcal, 3, empirical),
+                 range(1999, 2021), False, netM, 3, empirical),
               "MScal":
                 # 2026-10-02: One fixed reference scale leaves two estimated type scales.
                 ("MS", 3, masksMS, MScal, 5+2, None,
-                 range(1999, 2021), False, MScal, 7, empirical),
+                 range(1999, 2021), False, netMS, 7, empirical),
               "MScaltrend":
                 # 2026-10-06: Fresh coefficients and zero initial slopes; all trends remain free.
                 ("MS", 3, masksMS, MScaltrend, 10+2,
                  5 * [0.1] + 5 * [0.0] + 2 * [0.1],
-                 range(1999, 2021), False, MScaltrend, 12, empirical)
+                 range(1999, 2021), False, netMStrend, 12, empirical)
              }[current]
     (vars, ndim, (maskc, mask0), evaluate, thetadim, theta0, years, train0,
-     net_model, netdim, (entry, nentry, format_fit, report_fit)) = spec
+     net_tau, netdim, (entry, nentry, format_fit, report_fit)) = spec
     tau, scale = callbacks(evaluate)
-    net_tau, _ = callbacks(net_model)
     outdim = netdim + 2 * ndim + 1 + nentry
     tPs, tQs, tMuHat, ee, data = load_data(vars, dev)
     entry = entry(data)
     treat_idcs = [i for i, t in enumerate(years) if 2001 <= t <= 2008]
-    fixedflows = False
-    netflow = create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0, fixed=fixedflows)
+    fixedflows = flows == Flows.Additive
+    netflow = create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0,
+                             flows=flows)
     masks = (jax.device_put(jnp.asarray(maskc, dtype=bool), dev),
              jax.device_put(jnp.asarray(mask0, dtype=bool), dev))
 
@@ -215,7 +216,8 @@ def main(train = False, noload = False,
         mu_hat = jax.device_put(tMuHat, cpu)
         ee = jax.device_put(ee, cpu)
         masks = jax.device_put(masks, cpu)
-        netflow = create_netflow(ee, mu_hat, tPs, tQs, treat_idcs, train0, fixed=fixedflows)
+        netflow = create_netflow(ee, mu_hat, tPs, tQs, treat_idcs, train0,
+                                 flows=flows)
 
         # 2026-10-12: Keep the reporting workflow here; preparation and display details live in reporting.py.
         # 2026-10-13: Keep shorter fixed-flow windows; proportional flows use the full horizon.
@@ -312,8 +314,14 @@ if __name__ == "__main__":
     parser.add_argument("--matchingplot",
                         action="store_true",
                         help="Run this script only to generate plots.")
+    flow_names = [flow.value for flow in Flows]
+    parser.add_argument("--flows", choices=flow_names,
+                        default=Flows.Proportional.value,
+                        help="Demographic entry and exit flow mode.")
     args = parser.parse_args()
+    flows = Flows(args.flows)
     try:
-        main(args.train, args.noload, args.neldermead, args.matchingplot)
+        main(args.train, args.noload, args.neldermead, args.matchingplot,
+             flows=flows)
     except KeyboardInterrupt:
         print("\nStopped by Ctrl-C.", flush=True)

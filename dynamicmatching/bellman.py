@@ -9,6 +9,7 @@ import sys
 
 from .deeplearning import masked_log
 from .helpers import minfb, TermColours, ManualLRScheduler, CF, extend
+from .helpers import Flows
 from .entry import empirical_entry, entry_mass
 
 def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
@@ -71,18 +72,23 @@ def incumbent_population(mus, d, p0, q0, p1, q1):
     F = jnp.einsum('nij,nijk->nk', tMuF, q)
     return jnp.concatenate([M, F], axis=1)
 
-def create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0, fixed=False):
-    # 2026-11-03: Apply the profile's fixed or proportional choice to both entry and exit.
+
+def create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0,
+                   flows=Flows.Proportional):
+    # Use the same demographic flow mode for entry and exit.
     entries, exits = jnp.tile(ee[:, 0], 2), jnp.tile(ee[:, 1], 2)
-    if fixed:
-        return lambda s: (entries - exits).astype(s.dtype)
     start = 0 if train0 else treat_idcs[0]
     regimes = jnp.zeros(len(tMuHat), dtype=tMuHat.dtype)
     regimes = regimes.at[jnp.asarray(treat_idcs)].set(1)
     reference = incumbent_population(tMuHat[start:], regimes[start:],
                                      tPs[2], tQs[2], tPs[1], tQs[1]).mean(0)
     entry_rates, exit_rates = entries / reference, exits / reference
-    return lambda s: (entry_rates - exit_rates).astype(s.dtype) * s
+    return {
+        Flows.Additive: lambda s: (entries - exits).astype(s.dtype),
+        Flows.Proportional:
+            lambda s: (entry_rates - exit_rates).astype(s.dtype) * s,
+        Flows.Off: jnp.zeros_like,
+    }[flows]
 
 
 def choices(mus, t, d, population, e, netflow, dt, dev):
