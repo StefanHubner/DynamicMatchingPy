@@ -319,7 +319,9 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
         matched = conditional_kl_loss(mu_star[idx0:,:,:], mu_star[idx0:,:,:], masks)
     kl_div, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star, m_hat, m_star, f_hat, f_star = matched
     # 2026-10-02: Report the KL, inner residual and total from the same evaluation.
-    total_loss = kl_div + 2.0 * loss
+    # Keep the FP32 inner residual, but combine outer scores in host FP64.
+    # Mixing a NumPy scalar with a JAX scalar here would demote the sum to FP32.
+    total_loss = np.float64(kl_div) + 2.0 * np.float64(loss)
     print("D_KL: ", kl_div.item(), " inner loss: ", loss.item(), " total loss: ", total_loss.item())
 
     return (total_loss, tMuHat, mu_star, loss,
@@ -333,6 +335,11 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 # KL criterion minimised between phat and pstar.
 # theoretically much cleaner and robust to accumulation of mass over/underestimation due to conditionality
 def conditional_kl_loss(mu_data, mu_model, masks):
+    """Compute conditional fit terms in JAX and accumulate the outer score in FP64.
+
+    This host-side score is used by Nelder-Mead/reporting, outside inner AD/JIT.
+    Probabilities, logarithms, and returned conditional arrays keep their dtype.
+    """
     T, ndim1, _ = mu_data.shape
     ndim = ndim1 - 1
 
@@ -348,9 +355,12 @@ def conditional_kl_loss(mu_data, mu_model, masks):
 
         log_phat = masked_log(p_hat, mc[:-1,:])
         log_pmod = masked_log(p_mod, mc[:-1,:])
-        row_kl = (p_hat * (log_phat - log_pmod)).sum(axis=-1)
+        # Transfer only the small historical-fit array, not the training graph.
+        # Weight cells before reducing so no row sum is first rounded to FP32.
+        weighted_terms = S_hat * (p_hat * (log_phat - log_pmod))
+        score = np.sum(np.asarray(weighted_terms), dtype=np.float64)
 
-        return p_hat, p_mod, S_hat, S_mod, (S_hat.squeeze(-1) * row_kl).sum()
+        return p_hat, p_mod, S_hat, S_mod, score
 
     maskc, _ = masks
     cond_m_hat, cond_m_star, m_hat, m_star, ckl_m = by_gender(mu_data, mu_model, maskc)

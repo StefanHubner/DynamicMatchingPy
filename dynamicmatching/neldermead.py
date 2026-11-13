@@ -93,4 +93,5 @@ class NelderMeadOptimizer:
         # Set parameters to best vertex
         self._unflatten_params(self.simplex[0])
 
-        return jnp.asarray(self.f_values[0])
+        # Preserve the FP64 objective score; simplex coordinates retain their dtype.
+        return np.float64(self.f_values[0])

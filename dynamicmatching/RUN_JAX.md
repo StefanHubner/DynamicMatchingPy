@@ -12,6 +12,8 @@ to record the exact JAX revision; a branch name alone is not a run identifier.
 - Fresh male/female Dirichlet batches on each update; the advanced random key
   carries into the next Nelder–Mead trial.
 - Annual beta 0.95; historical window 1999–2020, initialized from observed 2001.
+- Historical KL and green diagnostics cover 2001–2020; the initial 2001
+  contribution is zero. Inner Bellman draws still cover the 1999–2020 grid.
 - Nelder–Mead outer search, simplex increment 0.3, nominal 1,000 iterations.
 - The November behavior that retains the incumbent score after shrink remains.
 - `--noload` starts coefficients at 0.1 with JAX random key 0. Backend random
@@ -95,6 +97,24 @@ percentage progress lines. It reports loss, gradient norm, and yellow margin
 RMS (the adding-up error) for the last training batch, before its Adam update,
 consistent with the existing returned-loss convention. The margin diagnostic
 excludes rejected draws and does not enter the objective or its gradient.
+
+The green conditional-error array and cyan `theta_t` describe the best newly
+evaluated trial in the current outer step. The red `best loss`/`best theta`
+describe the global best so far; these can refer to an earlier trial when the
+current step reports no improvement.
+
+Historical KL cell contributions are computed in FP32 and summed in host FP64.
+For MScal, this transfers just 480 FP32 values (1,920 bytes) across both genders
+and 20 years. The total `KL + 2 * inner_loss` and the scores retained/returned by
+Nelder–Mead preserve FP64. The inner residual itself remains FP32, as do neural
+training, recursive predictions, and simplex coordinates. Global JAX x64 is
+not enabled, so sampling and GPU matrix arithmetic retain their existing dtypes.
+This improves numerical resolution of the outer score's accumulation; it does
+not remove approximation error or noise already present in the FP32 terms.
+A synthetic check found two predictions with tied old FP32 KL scores whose
+FP64 scores differed by 1.86e-9; Nelder–Mead retained the lower FP64 score.
+The compiled inner solve contained no FP64 operations and reproduced the
+previous FP32 inner loss. GPU timing has not been benchmarked locally.
 
 The reporting change was checked on a small synthetic MScal problem on CPU:
 the compiled 300-update solve returned exactly the same loss, network weights,
