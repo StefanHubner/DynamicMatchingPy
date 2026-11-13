@@ -19,3 +19,8 @@ __pycache__/
 *.py[cod]
 /tests/
 /logs/
+
+# Local project documentation
+/dynamicmatching/LEGACY_COMPARISON.md
+/dynamicmatching/README.md
+/dynamicmatching/RUN_JAX.md
