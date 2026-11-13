@@ -146,14 +146,15 @@ def discounted_welfare(flows, horizon, beta):
 
 def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
              scale, masks, tis, years, cf, train0, beyond, beta,
-             bellman_welfare=False, welfare_horizon=0, entry=empirical_entry):
+             bellman_welfare=False, welfare_horizon=0, entry=empirical_entry,
+             kl=conditional_kl_loss):
     tail = max(welfare_horizon - 1, 0)
     (_, muh1, mus, _, conds, margs, vs, _, _,
      diagnostics, logits) = match_moments(
         xi, theta, tPs, tQs, muh, netflow, ng,
         dev, tau, scale, masks, tis, years,
         skiptrain=True, cf=cf, train0=train0, beyond=beyond + tail,
-        bellman_welfare=bellman_welfare, beta=beta, entry=entry)
+        bellman_welfare=bellman_welfare, beta=beta, entry=entry, kl=kl)
     if welfare_horizon:
         start, stop = (0 if train0 else tis[0]), len(muh) + beyond
         mus = mus[:stop]

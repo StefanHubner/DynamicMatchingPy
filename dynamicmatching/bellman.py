@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import equinox as eqx
 import optax
 import numpy as np
+from functools import partial
 import math
 import pdb
 import sys
@@ -14,7 +15,7 @@ from .entry import empirical_entry, entry_mass
 
 def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                    ng, dev, tau, scale, masks, treat_idcs, years,
-                   optim, cf, train0, beta, key, entry=empirical_entry):
+                   optim, cf, train0, beta, kl, key, entry=empirical_entry):
     additional = [None, None, None, None, None, xi, None, 0.0, None]
     def closure(candidate_theta):
         nonlocal xi, key
@@ -23,7 +24,7 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
             xi, candidate_theta, tPs, tQs, tMuHat,
             netflow, ng, dev, tau, scale, masks, treat_idcs,
             years, skiptrain=False, cf=cf, train0=train0,
-            beyond=0, beta=beta, key=key, entry=entry)
+            beyond=0, beta=beta, kl=kl, key=key, entry=entry)
         xi = candidate_xi
         additional[:6] = [ssh, sss, l, conds, margs, xi]
         mass_max = float(diagnostics["max_mass_deviation"])
@@ -251,7 +252,7 @@ def overallPQ(tPs, tQs, n0, n1, n2):
     return tP, tQ, tPs[2], tQs[2], tPs[1], tQs[1]
 
 def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
-                  ng, dev, tau, scale, masks, treat_idcs, years, beta,
+                  ng, dev, tau, scale, masks, treat_idcs, years, beta, kl,
                   skiptrain = False, cf = CF.None_, train0 = True, beyond = 0,
                   bellman_welfare=False, key=None, entry=empirical_entry):
 
@@ -349,10 +350,10 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     star_idcs = slice(idx0, len(mu_star) - beyond)
     if beyond == 0:
-        matched = conditional_kl_loss(tMuHat[idx0:,:,:], mu_star[star_idcs,:,:], masks)
+        matched = kl(tMuHat[idx0:], mu_star[star_idcs], masks)
     else:
         # 2026-10-02: Duplicate model outputs into hat for extended-plot alignment, not data-fit validation.
-        matched = conditional_kl_loss(mu_star[idx0:,:,:], mu_star[idx0:,:,:], masks)
+        matched = kl(mu_star[idx0:], mu_star[idx0:], masks)
     kl_div, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star, m_hat, m_star, f_hat, f_star = matched
     # 2026-10-02: Report the KL, inner residual and total from the same evaluation.
     # Keep the FP32 inner residual, but combine outer scores in host FP64.
@@ -366,13 +367,10 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
             (m_hat, m_star, f_hat, f_star),
             v_star, xi, key, jax.device_get(diagnostics), logits_star)
 
-# earlier frobenius norm matching has a margin-mismatch component, which is controlled by the markov kernel
-# and entry/exit. as a result, being a square criterion it balances this over different cells.
-# now matching is conditional on margins which is invariant wrt the markov kernel errors.
-# KL criterion minimised between phat and pstar.
-# theoretically much cleaner and robust to accumulation of mass over/underestimation due to conditionality
-def conditional_kl_loss(mu_data, mu_model, masks):
-    """Compute conditional fit terms in JAX and accumulate the outer score in FP64.
+
+# Joint KL counts couples twice and singles once across the two gender passes.
+def kl_loss(mu_data, mu_model, masks, probabilities):
+    """Compute matching KL and conditional diagnostics; sum the score in FP64.
 
     This host-side score is used by Nelder-Mead/reporting, outside inner AD/JIT.
     Probabilities, logarithms, and returned conditional arrays keep their dtype.
@@ -390,11 +388,13 @@ def conditional_kl_loss(mu_data, mu_model, masks):
         p_hat = data_rows / (S_hat + 1e-12)
         p_mod = model_rows / (S_mod + 1e-12)
 
-        log_phat = masked_log(p_hat, mc[:-1,:])
-        log_pmod = masked_log(p_mod, mc[:-1,:])
+        q_hat, weight = probabilities(data_rows, p_hat, S_hat)
+        q_mod, _ = probabilities(model_rows, p_mod, S_mod)
+        log_phat = masked_log(q_hat, mc[:-1, :])
+        log_pmod = masked_log(q_mod, mc[:-1, :])
         # Transfer only the small historical-fit array, not the training graph.
         # Weight cells before reducing so no row sum is first rounded to FP32.
-        weighted_terms = S_hat * (p_hat * (log_phat - log_pmod))
+        weighted_terms = weight * (q_hat * (log_phat - log_pmod))
         score = np.sum(np.asarray(weighted_terms), dtype=np.float64)
 
         return p_hat, p_mod, S_hat, S_mod, score
@@ -404,4 +404,10 @@ def conditional_kl_loss(mu_data, mu_model, masks):
     cond_f_hat, cond_f_star, f_hat, f_star, ckl_f = by_gender(mu_data.swapaxes(1,2), mu_model.swapaxes(1,2), maskc.T)
 
     return ckl_m + ckl_f, cond_m_hat, cond_m_star, cond_f_hat, cond_f_star, m_hat, m_star, f_hat, f_star
+
+
+conditional_kl_loss = partial(
+    kl_loss, probabilities=lambda mass, cond, margin: (cond, margin))
+joint_kl_loss = partial(
+    kl_loss, probabilities=lambda mass, cond, margin: (mass, 1))
 

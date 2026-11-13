@@ -23,6 +23,7 @@ from dynamicmatching.reporting import sandbox_controls, show_sandbox, show_raw_m
 from dynamicmatching.reporting import (
     format_entry_losses, report_entry, no_fit_text, no_fit_report)
 from dynamicmatching.entry import empirical_spec, endogenous_entry
+from dynamicmatching.bellman import conditional_kl_loss, joint_kl_loss
 
 
 # 2026-10-22: Set the annual discount factor once for estimation and welfare reporting.
@@ -47,7 +48,7 @@ def load_data(name, dev):
 
 
 def main(train=False, noload=False, neldermead=True, matchingplot=False,
-         patience=150, flows=Flows.Off):
+         patience=150, flows=Flows.Off, kl=conditional_kl_loss):
 
     np.set_printoptions(precision=4, suppress=True)
     figures = Path("figures")
@@ -135,7 +136,7 @@ def main(train=False, noload=False, neldermead=True, matchingplot=False,
                                               ng, dev, tau, scale, masks,
                                               treat_idcs, years, optim,
                                               CF.None_, train0, beta,
-                                              key=key, entry=entry)
+                                              kl=kl, key=key, entry=entry)
         np.set_printoptions(precision=5, suppress=True)
 
         columns = (['loss', 'l'] + [f'theta{i}' for i in range(thetadim)]
@@ -232,7 +233,7 @@ def main(train=False, noload=False, neldermead=True, matchingplot=False,
                 name: load_mus(xi, theta, tPs, tQs, mu_hat, netflow,
                                ng, "cpu", tau, scale, masks,
                                treat_idcs, years, cf, train0, beyond, beta,
-                               welfare_horizon=horizon, entry=entry)
+                               welfare_horizon=horizon, entry=entry, kl=kl)
                 for name, cf in scenarios.items()}
 
         frames_by_welfare = {measure: prepare_plot_frames(result, years, treat_idcs, train0, beyond)
@@ -318,10 +319,14 @@ if __name__ == "__main__":
     parser.add_argument("--flows", choices=flow_names,
                         default=Flows.Off.value,
                         help="Demographic entry and exit flow mode.")
+    losses = {"conditional": conditional_kl_loss, "joint": joint_kl_loss}
+    parser.add_argument("--kl", choices=losses, default="conditional",
+                        help="Matching KL: conditional on type or joint.")
     args = parser.parse_args()
     flows = Flows(args.flows)
+    kl = losses[args.kl]
     try:
         main(args.train, args.noload, args.neldermead, args.matchingplot,
-             flows=flows)
+             flows=flows, kl=kl)
     except KeyboardInterrupt:
         print("\nStopped by Ctrl-C.", flush=True)
