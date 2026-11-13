@@ -133,6 +133,10 @@ class SinkhornGeneric(Sinkhorn):
         self.num_iterations = 25
 
     def apply(self, params, margins_td):
+        mus, V, logits = self.policy(params, margins_td)
+        return mus, V
+
+    def policy(self, params, margins_td):
         zs = jnp.zeros((margins_td.shape[0], 1), dtype=margins_td.dtype)
         M = jnp.concatenate((margins_td[:, :self.ndim], zs), axis=1)
         F = jnp.concatenate((margins_td[:, self.ndim:2*self.ndim], zs), axis=1)
@@ -147,14 +151,15 @@ class SinkhornGeneric(Sinkhorn):
         muc0f = jnp.exp(pars[:, self.f0i]) # positive!
         muc = muc.at[:, :(M.shape[1]-1), -1:].set(mucm0.reshape(-1, (M.shape[1]-1), 1))
         muc = muc.at[:, -1:, :(F.shape[1]-1)].set(muc0f.reshape(-1, 1, (F.shape[1]-1)))
-        V = jnp.exp(pars[:, -1])
+        V = jnp.exp(pars[:, self.f0i.stop])
         stk = jnp.concatenate((muc, M[:, :, None], F[:, :, None]), axis=2)
         iter = self.num_iterations if self.training else 100
         mus = jax.vmap(lambda p: self.sinkhorn(p[:, :self.ndim+1],
                                               p[:,(self.ndim+1)],
                                               p[:,(self.ndim+2)],
                                               iter))(stk)
-        return mus, V
+        logits = pars[:, self.f0i.stop+1:]
+        return mus, V, logits
 
 
 # Should now be deprecated in favor of SinkhornGeneric

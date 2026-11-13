@@ -19,6 +19,8 @@ from dynamicmatching import SinkhornGeneric
 from dynamicmatching import NelderMeadOptimizer
 from dynamicmatching.reporting import load_mus, prepare_plot_frames, prepare_fit_frame, save_plot
 from dynamicmatching.reporting import sandbox_controls, show_sandbox, show_raw_matches, format_training_step
+from dynamicmatching.reporting import format_entry_losses, report_entry, no_fit_text, no_fit_report
+from dynamicmatching.entry import empirical_spec, endogenous_entry
 
 
 # 2026-10-22: Set the annual discount factor once for estimation and welfare reporting.
@@ -39,7 +41,7 @@ def load_data(name, dev):
     tQs = jax.device_put(jnp.asarray(data["q"][0]), dev)
     tMuHat = jax.device_put(jnp.asarray(data["couplings"][0]), dev)
     ee = jax.device_put(jnp.asarray(data["entryexit"][0]), dev)
-    return tPs, tQs, tMuHat, ee
+    return tPs, tQs, tMuHat, ee, data[0]
 
 
 def main(train = False, noload = False,
@@ -64,6 +66,10 @@ def main(train = False, noload = False,
               "MS":
                 ("MS", 3, masksMS, MS, 11,
                  theta_ms, range(1999, 2021), False),
+              "MSentry":
+                ("MS", 3, masksMS, MS, 13,
+                 jnp.concatenate((theta_ms, jnp.array([2.5, 0.0]))),
+                 range(1999, 2021), False),
               "MStrend":
                 ("MS", 3, masksMS, MStrend, 16,
                  jnp.concatenate((theta_ms[:5], jnp.zeros(5), theta_ms[5:])),
@@ -83,11 +89,17 @@ def main(train = False, noload = False,
              }[current]
     vars, ndim, (maskc, mask0), evaluate, thetadim, theta0, years, train0 = spec
     tau, scale = callbacks(evaluate)
-    net_model, netdim = {"M": (Mcal, 3), "MS": (MScal, 7),
+    net_model, netdim = {"M": (Mcal, 3), "MS": (MScal, 7), "MSentry": (MScal, 7),
                          "MStrend": (MScaltrend, 12)}.get(current, (evaluate, thetadim))
     net_tau, _ = callbacks(net_model)
-    outdim = netdim + 2 * ndim + 1
-    tPs, tQs, tMuHat, ee = load_data(vars, dev)
+    entry_specs = {
+        "MSentry": (endogenous_entry, 1, format_entry_losses, report_entry)
+    }
+    default_entry = (empirical_spec, 0, no_fit_text, no_fit_report)
+    entry, nentry, format_fit, report_fit = entry_specs.get(current, default_entry)
+    outdim = netdim + 2 * ndim + 1 + nentry
+    tPs, tQs, tMuHat, ee, data = load_data(vars, dev)
+    entry = entry(data)
     treat_idcs = [i for i, t in enumerate(years) if 2001 <= t <= 2008]
     fixedflows = False
     netflow = create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0, fixed=fixedflows)
@@ -124,11 +136,11 @@ def main(train = False, noload = False,
                                               tPs, tQs, tMuHat, netflow,
                                               ng, dev, tau, scale, masks,
                                               treat_idcs, years, optim,
-                                              CF.None_, train0, beta, key=key)
+                                              CF.None_, train0, beta, key=key, entry=entry)
         np.set_printoptions(precision=5, suppress=True)
 
         columns = (['loss', 'l'] + [f'theta{i}' for i in range(thetadim)]
-                   + ['inner_min_step', 'inner_steps'])
+                   + ['inner_min_step', 'inner_steps', 'matching_kl', 'entry_kl'])
         history = pd.DataFrame(index=np.arange(1, num_epochs+1),
                                columns=columns)
 
@@ -166,16 +178,20 @@ def main(train = False, noload = False,
 
             diffs = (0.5 * (cond_m_star - cond_m_hat) + 0.5 * (cond_f_star - cond_f_hat)
                      if improved else None)
-            print(format_training_step(
+            message = format_training_step(
                 epoch, num_epochs, curloss if evaluated is not None else None,
                 losshat if best_epoch else None, float(l) if evaluated is not None else None,
                 par if evaluated is not None else None, thetahat if best_epoch else None,
                 add_outputs[7], conditional_diffs=diffs,
                 steps_without_improvement=epoch - best_epoch, patience=patience,
-                inner_min_step=inner_min_step, inner_steps=inner_steps), flush=True)
+                inner_min_step=inner_min_step, inner_steps=inner_steps)
+            report = message + format_fit(inner_diagnostics)
+            print(report, flush=True)
 
             history.loc[epoch] = ([curloss, float(l)] + par.tolist()
-                                  + [inner_min_step or np.nan, inner_steps or np.nan])
+                                  + [inner_min_step or np.nan, inner_steps or np.nan,
+                                     inner_diagnostics.get('matching_kl', np.nan),
+                                     inner_diagnostics.get('entry_kl', np.nan)])
             history.iloc[:epoch].to_csv(figures / 'training_history.csv')
 
             if not best_epoch:
@@ -213,7 +229,7 @@ def main(train = False, noload = False,
                 name: load_mus(xi, theta, tPs, tQs, mu_hat, netflow,
                                ng, "cpu", tau, scale, masks,
                                treat_idcs, years, cf, train0, beyond, beta,
-                               welfare_horizon=horizon)
+                               welfare_horizon=horizon, entry=entry)
                 for name, cf in scenarios.items()}
 
         frames_by_welfare = {measure: prepare_plot_frames(result, years, treat_idcs, train0, beyond)
@@ -234,6 +250,9 @@ def main(train = False, noload = False,
         save_plot(plot_margin_counterfactuals, frames["marginal"], figures / f"{current}_margins_CF.pdf",
                   csv=True, estimator="star", scenarios=("CFF", "CF1"),
                   beyond=beyond, forecast_start=years.stop)
+        start = 0 if train0 else treat_idcs[0]
+        prefix = figures / current
+        report_fit(results, years, start, beyond, prefix)
         # 2026-10-22: Keep contemporaneous welfare and export discounted path welfare separately.
         for measure, _, suffix, title in welfare_measures:
             welfare = frames_by_welfare[measure]["welfare"].rename(columns={"Welfare": title}, level="state")
@@ -250,11 +269,11 @@ def main(train = False, noload = False,
                                 len(treat_idcs), len(post))
         dt = 1.0 / (years[-1] - years[0])
         controls = sandbox_controls(vars, years)
-        mu_star = results["CFF"][1]
+        _, mu_star, _, _, _, _, _ = results["CFF"]
         sandbox, process, raw = st.tabs(["Sandbox", "Matched Processes", "Raw"])
 
         with sandbox:
-            show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt)
+            show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt, entry=entry)
 
         with process:
             myears = np.asarray([train0 for _ in range(treat_idcs[0])]

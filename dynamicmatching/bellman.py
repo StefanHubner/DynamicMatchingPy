@@ -9,21 +9,22 @@ import sys
 
 from .deeplearning import masked_log
 from .helpers import minfb, TermColours, ManualLRScheduler, CF, extend
+from .entry import empirical_entry, entry_mass
 
 def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                    ng, dev, tau, scale, masks, treat_idcs, years,
-                   optim, cf, train0, beta, key):
+                   optim, cf, train0, beta, key, entry=empirical_entry):
     additional = [None, None, None, None, None, xi, None, 0.0, None]
     def closure(candidate_theta):
         nonlocal xi, key
-        resid, ssh, sss, l, conds, margs, _, candidate_xi, key, diagnostics = match_moments(xi,
+        resid, ssh, sss, l, conds, margs, _, candidate_xi, key, diagnostics, _ = match_moments(xi,
                                               candidate_theta,
                                               tPs, tQs, tMuHat,
                                               netflow, ng, dev,
                                               tau, scale, masks, treat_idcs,
                                               years, skiptrain=False,
                                               cf = cf, train0 = train0,
-                                              beyond = 0, beta = beta, key = key)
+                                              beyond = 0, beta = beta, key = key, entry=entry)
         xi = candidate_xi
         additional[:6] = [ssh, sss, l, conds, margs, xi]
         mass_max = float(diagnostics["max_mass_deviation"])
@@ -85,8 +86,8 @@ def create_netflow(ee, tMuHat, tPs, tQs, treat_idcs, train0, fixed=False):
     entry_rates, exit_rates = entries / reference, exits / reference
     return lambda s: (entry_rates - exit_rates).astype(s.dtype) * s
 
-def choices(mus, t, d, p0, q0, p1, q1, netflow, dt, dev):
-    Sincumb = incumbent_population(mus, d, p0, q0, p1, q1)
+def choices(mus, t, d, population, e, netflow, dt, dev):
+    Sincumb = population(mus, e, d)
     S0 = Sincumb + netflow(Sincumb)
     # 2026-10-02: Normalize each sampled economy separately after net flows.
     S = S0 / S0.sum(axis=1, keepdims=True)
@@ -115,13 +116,27 @@ def matching_entropy(mus, male_margins, female_margins, scales, maskc):
     return -(entropy_c_m + entropy_c_f)
 
 
+def flow_reward(mus, s, t, d, theta, tau, scale, maskc, payoff, logits, dev):
+    ndim = mus.shape[1] - 1
+    vmapper = jax.vmap(lambda t, d: tau(theta, t, d, dev))
+    phi = vmapper(t, d)
+    unregularised = (mus * phi).sum(axis=(1, 2))
+    M, F = s[:, :ndim], s[:, ndim:2*ndim]
+    sigma = scale(theta, dev)
+    entropy = matching_entropy(mus, M, F, sigma, maskc)
+    entry_payoff = payoff(mus, logits)
+    fun = unregularised + entropy + entry_payoff
+    return fun
+
+
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, transitions, netflow,
-              beta, theta, tau, scale, masks, ts, dev, key):
+              beta, theta, tau, scale, masks, ts, dev, key, entry=empirical_entry):
 
     maskc, mask0 = masks # maskc now has all information
     _, _, tP0, tQ0, tP1, tQ1 = transitions
     ndim = tP0.shape[0]
+    population, payoff, condition, _ = entry(theta, transitions, incumbent_population)
 
     # 2026-11-13: Explicit random keys; mask rejected draws instead of dropping rows.
     keym, keyf, keyp, keyt, keyd = jax.random.split(key, 5)
@@ -136,17 +151,12 @@ def residuals(ng0, xi, transitions, netflow,
     rds = jax.random.randint(keyd, (ng, 1), 0, 2).astype(ts.dtype)
     st = jnp.concatenate((s, rts, rds), axis = 1)
 
-    mus, vcur = xi(st)
+    mus, vcur, logits = xi.policy(xi.params, st)
     dt = ts[1] - ts[0]
     # 2026-11-13: JAX differentiates a function of mus, rather than an existing graph.
-    def objective(mus):
-        stnext = choices(mus, rts, rds, tP0, tQ0, tP1, tQ1, netflow, dt, dev)
+    def objective(mus, e):
+        stnext = choices(mus, rts, rds, population, e, netflow, dt, dev)
         _, vnext = xi(stnext)
-
-        vmapper = jax.vmap(lambda t, d: tau(theta, t, d, dev), in_axes=(0, 0))
-        phi0 = vmapper(rts, rds)
-        unregularised = (mus * phi0).sum(axis=(1,2))
-
         # Choo/Siow (2006): 2ec-em-ef, Galichon has 2ec+em+ef (sometimes other)
         # 2 e_c - e_m - e_f is the one consistent with dE/dmu = Phi
         # -entropy is the largest for uniform distribution (all mus equal)
@@ -159,14 +169,17 @@ def residuals(ng0, xi, transitions, netflow,
         # entropym = (masked_log(mus[:,:,-1], mask0) * mus[:,:,-1]).sum(dim=1)
         # entropy = -(2 * entropyc - entropym - entropyf)
 
-        entropy = matching_entropy(mus, s[:, :ndim], s[:, ndim:(2*ndim)],
-                                   scale(theta, dev), maskc)
-
-        fun = unregularised + entropy
-
+        fun = flow_reward(mus, s, rts, rds, theta, tau, scale,
+                          maskc, payoff, logits, dev)
         sumL = jnp.sum(fun + beta * vnext)
         return sumL, (fun, vnext)
-    grads, (fun, vnext) = jax.grad(objective, has_aux=True)(mus)
+    objective_grad = jax.grad(objective, argnums=(0, 1), has_aux=True)
+    e = entry_mass(mus, logits)
+    (grads, gain), (fun, vnext) = objective_grad(mus, e)
+    # Matching varies mu at fixed entry share; gain is the derivative per entrant.
+    p = jax.nn.sigmoid(logits)
+    correction = (gain * p).sum(axis=1)
+    grads = grads.at[:, 0, 0].add(correction)
 
     margs = jnp.concatenate([mus[:,:-1,:].sum(2), mus[:,:,:-1].sum(1)], axis=1)
 
@@ -178,8 +191,10 @@ def residuals(ng0, xi, transitions, netflow,
     r1 = jnp.pad(r1, ((0, 0), (0, 1), (0, 1))).reshape(ng, -1)
     r2 = lambda2 * jnp.square((vcur - fun - beta * vnext).reshape(ng, 1))
     r3 = lambda3 * jnp.square(s - margs).reshape(ng, -1)
+    entry_foc = condition(logits, gain)
+    r4 = jnp.square(entry_foc)
 
-    resid_v = jnp.concatenate((r1, r2, r3), axis=1)
+    resid_v = jnp.concatenate((r1, r2, r3, r4), axis=1)
     mean_resid_v = jnp.where(valid[:, None], resid_v, 0).sum() / (valid.sum() * resid_v.shape[1])
 
     mass_max = jnp.max(jnp.where(valid[:, None], jnp.abs(s - margs), 0))
@@ -193,15 +208,17 @@ def inner_loss_minimum_step(losses):
 
 @eqx.filter_jit
 def minimise_inner(xi, theta, beta, transitions, netflow,
-                   ng, ts, tau, scale, masks, dev, key):
+                   ng, ts, tau, scale, masks, dev, key, entry=empirical_entry):
 
     epochs = 600
     optimiser = optax.adam(0.001)
     params = xi.params
     opt_state = optimiser.init(params)
-    loss_grad = jax.value_and_grad(lambda params, key: residuals(
-        ng, xi.with_params(params), transitions, netflow,
-        beta, theta, tau, scale, masks, ts, dev, key), has_aux=True)
+    def loss_fn(params, key):
+        network = xi.with_params(params)
+        return residuals(ng, network, transitions, netflow,
+                         beta, theta, tau, scale, masks, ts, dev, key, entry)
+    loss_grad = jax.value_and_grad(loss_fn, has_aux=True)
 
     def step(carry, epoch):
         params, opt_state, key = carry
@@ -213,10 +230,11 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
 
     (params, opt_state, key), (losses, mass_errors) = jax.lax.scan(
         step, (params, opt_state, key), jnp.arange(epochs))
-    return (losses[-1], xi.with_params(params), key,
-            {"max_mass_deviation": mass_errors.max(),
-             "inner_min_step": inner_loss_minimum_step(losses),
-             "inner_steps": epochs})
+    xi = xi.with_params(params)
+    diagnostics = {"max_mass_deviation": mass_errors.max(),
+                   "inner_min_step": inner_loss_minimum_step(losses),
+                   "inner_steps": epochs}
+    return losses[-1], xi, key, diagnostics
 
 def overallPQ(tPs, tQs, n0, n1, n2):
     tP = (n0 * tPs[0] + n1 * tPs[1] + n2 * tPs[2] ) / (n0 + n1 + n2)
@@ -226,7 +244,7 @@ def overallPQ(tPs, tQs, n0, n1, n2):
 def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
                   ng, dev, tau, scale, masks, treat_idcs, years, beta,
                   skiptrain = False, cf = CF.None_, train0 = True, beyond = 0,
-                  bellman_welfare = False, key=None):
+                  bellman_welfare = False, key=None, entry=empirical_entry):
 
     beta = jnp.asarray(beta, dtype=theta.dtype)
     ts0 = jnp.asarray(years, dtype=theta.dtype)
@@ -246,11 +264,12 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     transitions = overallPQ(tPs, tQs, int(train0)*len(pre),
                             len(treat_idcs), len(post))
     tP, tQ, tP0, tQ0, tP1, tQ1 = transitions
+    population, payoff, _, fit_entry = entry(theta, transitions, incumbent_population)
 
     if not skiptrain:
         xi = xi.train()
         loss, xi, key, diagnostics = minimise_inner(xi, theta, beta, transitions, netflow,
-                                      ng, ts, tau, scale, masks, dev, key)
+                                      ng, ts, tau, scale, masks, dev, key, entry)
     else:
         loss = jnp.asarray(0.0, dtype=theta.dtype)
         diagnostics = None
@@ -262,14 +281,14 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
                 CF.HighCost: 0, CF.LowCost: 1}[cf]
         return jnp.asarray([[flag]], dtype=theta.dtype)
 
-    def transition_mu(xi, p0, q0, p1, q1):
-        def step(mus, t, current_regime, next_regime):
-            sst = choices(mus, t, current_regime, p0, q0, p1, q1,
-                          netflow, ts[1] - ts[0], dev)
+    def transition_mu(xi):
+        def step(mus, logits, t, current_regime, next_regime):
+            e = entry_mass(mus, logits)
+            dt = ts[1] - ts[0]
+            sst = choices(mus, t, current_regime, population, e, netflow, dt, dev)
             # 2026-10-02: Evaluate next year's matching under next year's regime.
             sst = jnp.concatenate([sst[:, :-1], next_regime], axis=1)
-            mus, vs = xi(sst)
-            return mus, vs
+            return xi.policy(xi.params, sst)
         return step
 
     tM = tMuHat[:,:-1,:].sum(2)
@@ -285,29 +304,33 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     transition = transition_mu
 
     # same transition for all regimes
-    _, v = xi(jnp.concatenate([ss_hat[idx0:idx0+1], ts[idx0].reshape(1,1),
-                              regime_at(idx0)], axis=1))
-    walker = transition(xi, tP0, tQ0, tP1, tQ1)
+    s0 = ss_hat[idx0:idx0+1]
+    t0 = ts[idx0].reshape(1,1)
+    d0 = regime_at(idx0)
+    st = jnp.concatenate([s0, t0, d0], axis=1)
+    _, v, logits = xi.policy(xi.params, st)
+    walker = transition(xi)
     regimes = ([(pre, walker)] if train0 else []) + [(treat_idcs, walker), (post, walker)] + ([(future, walker)] if beyond > 0 else [])
 
     mu_star = jnp.zeros((nT+beyond, nty0, nty0), dtype=tMuHat.dtype)
     v_star = jnp.zeros((nT+beyond, 1), dtype=tMuHat.dtype)
+    logits_star = jnp.zeros((nT+beyond, logits.shape[1]), dtype=tMuHat.dtype)
 
     for (idcs, walker) in regimes:
         for i in idcs:
             mu_star = mu_star.at[i, :, :].set(mu_cur[0])
+            logits_star = logits_star.at[i].set(logits[0])
             current_regime = regime_at(i)
             next_regime = regime_at(i + 1)
             if bellman_welfare:
                 # 2026-10-22: Report current-state V before the walker advances to next year's value.
                 v_star = v_star.at[i, :].set(v)
             else:
-                unreg = (mu_cur * tau(theta, ts[i].reshape(1,1), current_regime, dev)).sum()
-                vdir = unreg + matching_entropy(
-                    mu_cur, mu_cur[:, :-1, :].sum(2), mu_cur[:, :, :-1].sum(1),
-                    scale(theta, dev), maskc).sum()
+                s = jnp.concatenate((mu_cur[:, :-1, :].sum(2), mu_cur[:, :, :-1].sum(1)), axis=1)
+                vdir = flow_reward(mu_cur, s, ts[i].reshape(1,1), current_regime,
+                                   theta, tau, scale, maskc, payoff, logits, dev).sum()
                 v_star = v_star.at[i, :].set(vdir) # vs v (approximate value fct)
-            mu_cur, v = walker(mu_cur, ts[i].reshape(1,1), current_regime, next_regime)
+            mu_cur, v, logits = walker(mu_cur, logits, ts[i].reshape(1,1), current_regime, next_regime)
 
     star_idcs = slice(idx0, len(mu_star) - beyond)
     if beyond == 0:
@@ -319,11 +342,14 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     # 2026-10-02: Report the KL, inner residual and total from the same evaluation.
     # Keep the FP32 inner residual, but combine outer scores in host FP64.
     # Mixing a NumPy scalar with a JAX scalar here would demote the sum to FP32.
-    total_loss = np.float64(kl_div) + 2.0 * np.float64(loss)
+    entry_kl, entry_rates = fit_entry(mu_star, logits_star)
+    total_loss = np.float64(kl_div) + entry_kl + 2.0 * np.float64(loss)
+    diagnostics = dict(diagnostics or {}, matching_kl=kl_div, entry_kl=entry_kl,
+                       entry_rates=entry_rates)
     return (total_loss, tMuHat, mu_star, loss,
             (cond_m_hat, cond_m_star, cond_f_hat, cond_f_star),
             (m_hat, m_star, f_hat, f_star),
-            v_star, xi, key, jax.device_get(diagnostics))
+            v_star, xi, key, jax.device_get(diagnostics), logits_star)
 
 # earlier frobenius norm matching has a margin-mismatch component, which is controlled by the markov kernel
 # and entry/exit. as a result, being a square criterion it balances this over different cells.

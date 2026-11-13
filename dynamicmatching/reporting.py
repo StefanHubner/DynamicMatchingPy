@@ -6,8 +6,9 @@ import streamlit as st
 import jax.numpy as jnp
 import numpy as np
 
-from .bellman import choices, conditional_kl_loss, match_moments
-from .graphs import create_heatmap
+from .bellman import choices, conditional_kl_loss, match_moments, incumbent_population
+from .entry import empirical_entry, entry_mass
+from .graphs import create_heatmap, plot_cf_grid, plot_estimator_grid
 from .helpers import TermColours
 
 
@@ -48,6 +49,19 @@ def format_training_step(step, max_steps, current_loss, best_loss, inner_loss,
         lines.append(f"{grey}New best: conditional differences (model - data, gender average)\n"
                      f"{details}{reset}")
     return "\n".join(lines)
+
+
+def format_entry_losses(diagnostics):
+    return (f"\nMatching KL: {diagnostics.get('matching_kl', np.nan):.10g}"
+            f" | entry KL: {diagnostics.get('entry_kl', np.nan):.10g}")
+
+
+def no_fit_text(diagnostics):
+    return ''
+
+
+def no_fit_report(results, years, start, beyond, prefix):
+    return None
 
 
 SERIES_NAMES = [("M", "hat"), ("M", "star"), ("F", "hat"), ("F", "star")]
@@ -131,14 +145,14 @@ def discounted_welfare(flows, horizon, beta):
 
 def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
              scale, masks, tis, years, cf, train0, beyond, beta,
-             bellman_welfare=False, welfare_horizon=0):
+             bellman_welfare=False, welfare_horizon=0, entry=empirical_entry):
     tail = max(welfare_horizon - 1, 0)
-    _, muh1, mus, _, conds, margs, vs, *_ = match_moments(xi, theta,
+    _, muh1, mus, _, conds, margs, vs, _, _, diagnostics, logits = match_moments(xi, theta,
                                         tPs, tQs, muh, netflow, ng,
                                         dev, tau, scale, masks, tis, years,
                                         skiptrain = True, cf = cf,
                                         train0 = train0, beyond = beyond + tail,
-                                        bellman_welfare = bellman_welfare, beta=beta)
+                                        bellman_welfare = bellman_welfare, beta=beta, entry=entry)
     if welfare_horizon:
         start, stop = (0 if train0 else tis[0]), len(muh) + beyond
         mus = mus[:stop]
@@ -147,7 +161,9 @@ def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
         matched = conditional_kl_loss(muh[start:] if beyond == 0 else mus[start:],
                                       mus[start:], masks)
         conds, margs = matched[1:5], matched[5:]
-    return muh1, mus, conds, margs, vs
+    logits = logits[:len(mus)]
+    rates = diagnostics['entry_rates']
+    return muh1, mus, conds, margs, vs, logits, rates
 
 
 def _series_columns(scenario, sex, estimator, tensor, states):
@@ -167,7 +183,7 @@ def prepare_plot_frames(results, years, treat_idcs, train0, beyond):
     columns = {name: {} for name in ("conditional", "marginal", "joint", "welfare")}
     start = 0 if train0 else treat_idcs[0]
     labels = [str(year) for year in range(years.start + start, years.stop + beyond)]
-    for scenario, (_, mu_star, conditional, marginal, welfare) in results.items():
+    for scenario, (_, mu_star, conditional, marginal, welfare, _, _) in results.items():
         ndim = mu_star.shape[1] - 1
         for name, tensors, states in (("conditional", conditional, CONDITIONAL_STATES[ndim]),
                                       ("marginal", marginal, MARGINAL_STATES[ndim])):
@@ -182,7 +198,7 @@ def prepare_plot_frames(results, years, treat_idcs, train0, beyond):
 
 
 def prepare_fit_frame(result, years, treat_idcs, train0, masks):
-    mu_hat, mu_star, _, _, _ = result
+    mu_hat, mu_star, _, _, _, _, _ = result
     start = 0 if train0 else treat_idcs[0]
     # 2026-10-12: Compare historical observed and model matches, excluding forecast alignment copies.
     conditional = conditional_kl_loss(mu_hat[start:], mu_star[start:len(mu_hat)], masks)[1:5]
@@ -191,6 +207,35 @@ def prepare_fit_frame(result, years, treat_idcs, train0, masks):
         series.update(_series_columns("CFF", sex, estimator, tensor,
                                        CONDITIONAL_STATES[mu_star.shape[1] - 1]))
     return _plot_frame(series, [str(year) for year in years[start:len(mu_hat)]])
+
+
+def prepare_entry_fit(result):
+    _, _, _, _, _, _, rates = result
+    series = {('CFF', 'both', label, 'Marriage entry probability'): rates[:, i]
+              for i, label in enumerate(('hat', 'star'))}
+    return _plot_frame(series, ['2001–2008', '2009–2020'])
+
+
+def report_entry(results, years, start, beyond, prefix):
+    series = {}
+    for scenario, (_, mus, _, _, _, logits, _) in results.items():
+        logits = np.asarray(logits)[start:, 0]
+        logp = -np.logaddexp(0, -logits)
+        p = np.exp(logp)
+        flows = p * np.asarray(mus)[start:, 0, 0]
+        series.update({
+            (scenario, "both", "star", "Marriage entry probability"): p,
+            (scenario, "both", "star", "Marriage entry flow"): flows})
+    labels = [str(y) for y in range(years.start + start, years.stop + beyond)]
+    frame = _plot_frame(series, labels)
+    save_plot(plot_cf_grid, frame, f"{prefix}_entry_cf.pdf", csv=True,
+              sex="both", dim=(1, 2), beyond=beyond, forecast_start=years.stop)
+    fitted = prepare_entry_fit(results["CFF"])
+    save_plot(plot_estimator_grid, fitted, f"{prefix}_entry_fit.pdf", csv=True,
+              sex="both", nrows=1, ncols=1)
+    _, _, _, _, _, _, rates = results["CFF"]
+    table = pd.DataFrame(rates, index=fitted.index, columns=['Entry observed', 'Entry fitted'])
+    print(table)
 
 
 def save_plot(plotter, frame, filename, csv=False, **kwargs):
@@ -252,17 +297,21 @@ def sandbox_controls(spec, years):
     return dict(SANDBOX_LAYOUTS[spec], ss=ss, t=s.t)
 
 
-def show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt):
+def show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt, entry=empirical_entry):
     ss, t = controls["ss"], controls["t"]
     hdmu, hds = controls["hdmu"], controls["hds"]
     _, _, tP0, tQ0, tP1, tQ1 = transitions
+    population, _, _, _ = entry(theta, transitions, incumbent_population)
     zero = jnp.array(0.0).reshape(1, 1)
     matches, values, next_states = [], [], []
     for regime, d in enumerate((zero, zero + 1)):
-        mus, v = xi(ss(regime))
+        st = ss(regime)
+        mus, v, logits = xi.policy(xi.params, st)
         matches.append(mus)
         values.append(v)
-        next_states.append(choices(matches[0], t, d, tP0, tQ0, tP1, tQ1, netflow, dt, "cpu"))
+        e = entry_mass(matches[0], logits)
+        stnext = choices(matches[0], t, d, population, e, netflow, dt, "cpu")
+        next_states.append(stnext)
 
     ps = np.asarray(theta)
     st.write("Parameters: " + ", ".join(["{:.2f}".format(p) for p in ps]))
