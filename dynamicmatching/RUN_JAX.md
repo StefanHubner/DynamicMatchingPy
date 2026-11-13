@@ -9,6 +9,8 @@ to record the exact JAX revision; a branch name alone is not a run identifier.
 - Specification: MScal, seven structural parameters; unmarried scale fixed to 1.
 - Primal objective only; proportional **entry and exit**, in training and plots.
 - 300 inner Adam updates per trial, learning rate 0.001; 4,096 sampled states.
+- Fresh male/female Dirichlet batches on each update; the advanced random key
+  carries into the next Nelder–Mead trial.
 - Annual beta 0.95; historical window 1999–2020, initialized from observed 2001.
 - Nelder–Mead outer search, simplex increment 0.3, nominal 1,000 iterations.
 - The November behavior that retains the incumbent score after shrink remains.
@@ -88,6 +90,19 @@ python main.py --spec MScal --train --noload
 
 Nelder–Mead is always used for the outer parameters; `--neldermead` is retained
 as a redundant compatibility flag. Adam remains the inner network optimizer.
+Each inner solve prints one summary after all 300 updates, replacing the
+percentage progress lines. It reports loss, gradient norm, and yellow margin
+RMS (the adding-up error) for the last training batch, before its Adam update,
+consistent with the existing returned-loss convention. The margin diagnostic
+excludes rejected draws and does not enter the objective or its gradient.
+
+The reporting change was checked on a small synthetic MScal problem on CPU:
+the compiled 300-update solve returned exactly the same loss, network weights,
+and random key as before. Instrumenting the actual Dirichlet calls across two
+compiled solves found 1,200 distinct batch keys and distinct observed sample
+vectors (two batches per update). A separate 4,096-draw check, including one
+rejected row, matched the legacy filtered-sample margin RMS formula. These
+checks do not establish convergence of the server estimation.
 
 ## Optional background run and record
 

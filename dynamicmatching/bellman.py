@@ -114,7 +114,7 @@ def matching_entropy(mus, male_margins, female_margins, scales, maskc):
 
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, transitions, netflow,
-              beta, theta, tau, scale, masks, ts, dev, key):
+              beta, theta, tau, scale, masks, ts, dev, key, return_mass=False):
 
     maskc, mask0 = masks # maskc now has all information
     _, _, tP0, tQ0, tP1, tQ1 = transitions
@@ -179,6 +179,11 @@ def residuals(ng0, xi, transitions, netflow,
     resid_v = jnp.concatenate((r1, r2, r3), axis=1)
     mean_resid_v = jnp.where(valid[:, None], resid_v, 0).sum() / (valid.sum() * resid_v.shape[1])
 
+    if return_mass:
+        # Report only accepted draws, as in the legacy filtered-sample check.
+        mass_rms = jnp.sqrt(jnp.where(valid[:, None], jnp.square(s - margs), 0).sum()
+                            / (valid.sum() * s.shape[1]))
+        return mean_resid_v, mass_rms
     return mean_resid_v
 
 
@@ -192,24 +197,26 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
     opt_state = optimiser.init(params)
     loss_grad = jax.value_and_grad(lambda params, key: residuals(
         ng, xi.with_params(params), transitions, netflow,
-        beta, theta, tau, scale, masks, ts, dev, key))
+        beta, theta, tau, scale, masks, ts, dev, key, return_mass=True), has_aux=True)
 
     def step(carry, epoch):
         params, opt_state, key = carry
         key, draw_key = jax.random.split(key)
-        loss, grads = loss_grad(params, draw_key)
+        (loss, mass_rms), grads = loss_grad(params, draw_key)
         updates, opt_state = optimiser.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
         grad_norm = check_grad_norm(grads)
-        jax.lax.cond(epoch % (epochs // 100) == 0,
-                     lambda: jax.debug.print("{percent}%: {loss:.4f} [{grad_norm:.4f}]",
-                         percent=epoch * 100 // epochs, loss=loss,
-                         grad_norm=grad_norm, ordered=True),
-                     lambda: None)
-        return (params, opt_state, key), loss
+        return (params, opt_state, key), (loss, grad_norm, mass_rms)
 
-    (params, opt_state, key), losses = jax.lax.scan(
+    (params, opt_state, key), (losses, grad_norms, mass_errors) = jax.lax.scan(
         step, (params, opt_state, key), jnp.arange(epochs))
+    # One summary per inner solve; diagnostics describe the last training batch.
+    jax.debug.print(
+        "Inner solve ({steps} Adam updates), last batch: loss={loss:.6g} "
+        "grad_norm={grad_norm:.3e} " + TermColours.YELLOW +
+        "margin RMS={mass_rms:.3e}" + TermColours.RESET,
+        steps=epochs, loss=losses[-1], grad_norm=grad_norms[-1],
+        mass_rms=mass_errors[-1], ordered=True)
     return losses[-1], xi.with_params(params), key
 
 def overallPQ(tPs, tQs, n0, n1, n2):
