@@ -18,7 +18,7 @@ from dynamicmatching import matched_process_plot, plot_cf_grid, plot_estimator_g
 from dynamicmatching import SinkhornGeneric
 from dynamicmatching import NelderMeadOptimizer
 from dynamicmatching.reporting import load_mus, prepare_plot_frames, prepare_fit_frame, save_plot
-from dynamicmatching.reporting import sandbox_controls, show_sandbox, show_raw_matches
+from dynamicmatching.reporting import sandbox_controls, show_sandbox, show_raw_matches, format_training_step
 
 
 # 2026-10-22: Set the annual discount factor once for estimation and welfare reporting.
@@ -43,8 +43,10 @@ def load_data(name, dev):
 
 
 def main(train = False, noload = False,
-         neldermead = True, matchingplot = False):
+         neldermead = True, matchingplot = False, patience = 150):
 
+    if patience < 0:
+        raise ValueError("patience must be nonnegative; use 0 to disable early stopping")
     np.set_printoptions(precision=4, suppress=True)
     figures = Path("figures")
     figures.mkdir(exist_ok=True)
@@ -130,7 +132,7 @@ def main(train = False, noload = False,
         network = eqx.tree_deserialise_leaves(f("xi"), network)
     xi = network.with_params(jax.device_put(network.params, dev))
     ng = 2**12 # max 2**19 number of draws (uniform gridpoints)
-    xihat, thetahat, losshat = xi, theta, 10e30
+    xihat, thetahat, losshat = xi, theta, float("inf")
 
     optim = NelderMeadOptimizer([theta], lr = 0.3)
     num_epochs = 1000
@@ -149,40 +151,52 @@ def main(train = False, noload = False,
                                columns=columns)
 
         hfpath = "./hfdd/"
+        best_epoch = 0
         for epoch in range(1, num_epochs + 1):
             # 2026-10-02: Compare this step's evaluated pair with the separately saved best.
             add_outputs[6] = None
-            loss = optim.step(closure)
-            theta = optim.param_groups[0]['params'][0]
-            curloss, eval_theta, eval_xi, outputs = add_outputs[6] or (
-                float(loss), theta, add_outputs[5], add_outputs[:5])
-            mush, muss, l, conds, margs = outputs
-            cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
-            par = np.asarray(eval_theta).flatten()
-            print(f"theta_t (best trial this step): {TermColours.CYAN}{par}{TermColours.RESET}")
-            if curloss < losshat:
+            add_outputs[7] = 0.0
+            optim.step(closure)
+            evaluated = add_outputs[6]
+            if evaluated is None:
+                # Do not pair a retained simplex score with unrelated/invalid outputs.
+                curloss, l = np.nan, np.nan
+                par = np.full(thetadim, np.nan)
+            else:
+                curloss, eval_theta, eval_xi, outputs = evaluated
+                mush, muss, l, conds, margs = outputs
+                cond_m_hat, cond_m_star, cond_f_hat, cond_f_star = conds
+                par = np.asarray(eval_theta).flatten()
+
+            improved = evaluated is not None and curloss < losshat
+            if improved:
                 losshat = curloss
                 thetahat = eval_theta
                 xihat = eval_xi
-                print("Saving tensors")
+                best_epoch = epoch
                 np.savez(hfpath + "theta" + current + ".npz", theta=np.asarray(thetahat))
                 eqx.tree_serialise_leaves(hfpath + "xi" + current + ".eqx", xihat)
-            else:
-                print("No improvement: step loss {}, best loss {}".format(curloss, losshat))
 
-            perc = int((epoch / num_epochs) * 100)
-            diffs = 0.5 * (cond_m_star - cond_f_hat) + 0.5 * (cond_f_star - cond_m_hat)
-            print(f"{TermColours.BRIGHT_RED}{perc}% : best loss {losshat:.4f} : \
-                    best theta {thetahat}: \r\n \
-                    {TermColours.GREEN}{diffs} \
-                    {TermColours.RESET}",
-                  end='\t', flush=True)
+            diffs = (0.5 * (cond_m_star - cond_m_hat) + 0.5 * (cond_f_star - cond_f_hat)
+                     if improved else None)
+            print(format_training_step(
+                epoch, num_epochs, curloss if evaluated is not None else None,
+                losshat if best_epoch else None, float(l) if evaluated is not None else None,
+                par if evaluated is not None else None, thetahat if best_epoch else None,
+                add_outputs[7], conditional_diffs=diffs,
+                steps_without_improvement=epoch - best_epoch, patience=patience), flush=True)
 
-            history.loc[epoch] = [curloss, l.item()] + par.tolist()
+            history.loc[epoch] = [curloss, float(l)] + par.tolist()
             history.iloc[:epoch].to_csv(figures / 'training_history.csv')
 
-        print(thetahat)
-        print("Done.")
+            if not best_epoch:
+                raise RuntimeError("No finite objective value in the first outer step; no new checkpoint saved.")
+            if patience and epoch - best_epoch >= patience:
+                print(f"Stopped after {patience} outer steps without a new best. "
+                      f"Saved best is from step {best_epoch}.", flush=True)
+                break
+        else:
+            print(f"Reached the {num_epochs}-step limit. Saved best is from step {best_epoch}.", flush=True)
 
 
     if not train:
@@ -288,5 +302,9 @@ if __name__ == "__main__":
     parser.add_argument("--matchingplot",
                         action="store_true",
                         help="Run this script only to generate plots.")
+    parser.add_argument("--patience", type=int, default=150,
+                        help="Stop after this many outer steps without a new best; 0 disables (default: 150).")
     args = parser.parse_args()
-    main(args.train, args.noload, args.neldermead, args.matchingplot)
+    if args.patience < 0:
+        parser.error("--patience must be nonnegative")
+    main(args.train, args.noload, args.neldermead, args.matchingplot, args.patience)

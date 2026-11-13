@@ -8,6 +8,44 @@ import numpy as np
 
 from .bellman import choices, conditional_kl_loss, match_moments
 from .graphs import create_heatmap
+from .helpers import TermColours
+
+
+def format_training_step(step, max_steps, current_loss, best_loss, inner_loss,
+                         current_theta, best_theta, max_mass_deviation,
+                         *, conditional_diffs=None, steps_without_improvement=0,
+                         patience=0):
+    """One coordinated outer-step report; details appear only for a new best."""
+    def number(value):
+        return "n/a" if value is None else f"{value:.10g}"
+
+    def parameters(theta):
+        if theta is None:
+            return "n/a"
+        return np.array2string(np.asarray(theta).flatten(), precision=3,
+                               floatmode="fixed", suppress_small=True,
+                               max_line_width=100000)
+
+    cyan, green, yellow, grey, reset = (TermColours.CYAN, TermColours.GREEN,
+                                       TermColours.YELLOW, TermColours.BRIGHT_BLACK,
+                                       TermColours.RESET)
+    patience_note = (f" | since best: {steps_without_improvement}/{patience}"
+                     if patience else "")
+    lines = [
+        f"Step {step}/{max_steps} | total current: {cyan}{number(current_loss)}{reset}"
+        f" | best: {green}{number(best_loss)}{reset}"
+        f" | inner current: {cyan}{number(inner_loss)}{reset}{patience_note}",
+        f"{yellow}Max mass deviation (all inner updates/trials): {max_mass_deviation:.3e}{reset}",
+        f"Parameters current: {cyan}{parameters(current_theta)}{reset}"
+        f" | best: {green}{parameters(best_theta)}{reset}",
+    ]
+    if conditional_diffs is not None:
+        details = np.array2string(np.asarray(conditional_diffs), precision=4,
+                                  floatmode="fixed", suppress_small=True,
+                                  max_line_width=120)
+        lines.append(f"{grey}New best: conditional differences (model - data, gender average)\n"
+                     f"{details}{reset}")
+    return "\n".join(lines)
 
 
 SERIES_NAMES = [("M", "hat"), ("M", "star"), ("F", "hat"), ("F", "star")]

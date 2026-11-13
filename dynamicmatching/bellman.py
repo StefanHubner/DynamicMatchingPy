@@ -13,9 +13,10 @@ from .helpers import minfb, TermColours, ManualLRScheduler, CF, extend
 def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                    ng, dev, tau, scale, masks, treat_idcs, years,
                    optim, cf, train0, beta, key):
-    additional = [None, None, None, None, None, xi, None]
+    additional = [None, None, None, None, None, xi, None, 0.0]
     def closure(candidate_theta):
         nonlocal xi, key
+        diagnostics = {}
         resid, ssh, sss, l, conds, margs, _, candidate_xi, key = match_moments(xi,
                                               candidate_theta,
                                               tPs, tQs, tMuHat,
@@ -23,13 +24,16 @@ def create_closure(xi, theta, tPs, tQs, tMuHat, netflow,
                                               tau, scale, masks, treat_idcs,
                                               years, skiptrain=False,
                                               cf = cf, train0 = train0,
-                                              beyond = 0, beta = beta, key = key)
+                                              beyond = 0, beta = beta, key = key,
+                                              diagnostics = diagnostics)
         xi = candidate_xi
         additional[:6] = [ssh, sss, l, conds, margs, xi]
+        mass_max = diagnostics["max_mass_deviation"]
+        additional[7] = max(additional[7], mass_max if np.isfinite(mass_max) else float("inf"))
         # 2026-10-02: Snapshot each evaluated pair before the outer optimizer changes theta or xi.
         value = float(resid)
         best = additional[6]
-        if value < (best[0] if best else float("inf")):
+        if np.isfinite(value) and value < (best[0] if best else float("inf")):
             additional[6] = (value, candidate_theta, xi,
                                      (ssh, sss, l, conds, margs))
         return resid
@@ -114,7 +118,8 @@ def matching_entropy(mus, male_margins, female_margins, scales, maskc):
 
 # Define the residuals function (unconstrained + sinkhorn)
 def residuals(ng0, xi, transitions, netflow,
-              beta, theta, tau, scale, masks, ts, dev, key, return_mass=False):
+              beta, theta, tau, scale, masks, ts, dev, key,
+              return_mass=False, return_max_mass=False):
 
     maskc, mask0 = masks # maskc now has all information
     _, _, tP0, tQ0, tP1, tQ1 = transitions
@@ -179,6 +184,9 @@ def residuals(ng0, xi, transitions, netflow,
     resid_v = jnp.concatenate((r1, r2, r3), axis=1)
     mean_resid_v = jnp.where(valid[:, None], resid_v, 0).sum() / (valid.sum() * resid_v.shape[1])
 
+    if return_max_mass:
+        mass_max = jnp.max(jnp.where(valid[:, None], jnp.abs(s - margs), 0))
+        return mean_resid_v, mass_max
     if return_mass:
         # Report only accepted draws, as in the legacy filtered-sample check.
         mass_rms = jnp.sqrt(jnp.where(valid[:, None], jnp.square(s - margs), 0).sum()
@@ -189,7 +197,7 @@ def residuals(ng0, xi, transitions, netflow,
 
 @eqx.filter_jit
 def minimise_inner(xi, theta, beta, transitions, netflow,
-                   ng, ts, tau, scale, masks, dev, key):
+                   ng, ts, tau, scale, masks, dev, key, return_diagnostics=False):
 
     epochs = 300
     optimiser = optax.adam(0.001)
@@ -197,27 +205,22 @@ def minimise_inner(xi, theta, beta, transitions, netflow,
     opt_state = optimiser.init(params)
     loss_grad = jax.value_and_grad(lambda params, key: residuals(
         ng, xi.with_params(params), transitions, netflow,
-        beta, theta, tau, scale, masks, ts, dev, key, return_mass=True), has_aux=True)
+        beta, theta, tau, scale, masks, ts, dev, key, return_max_mass=True), has_aux=True)
 
     def step(carry, epoch):
         params, opt_state, key = carry
         key, draw_key = jax.random.split(key)
-        (loss, mass_rms), grads = loss_grad(params, draw_key)
+        (loss, mass_max), grads = loss_grad(params, draw_key)
         updates, opt_state = optimiser.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
-        grad_norm = check_grad_norm(grads)
-        return (params, opt_state, key), (loss, grad_norm, mass_rms)
+        return (params, opt_state, key), (loss, mass_max)
 
-    (params, opt_state, key), (losses, grad_norms, mass_errors) = jax.lax.scan(
+    (params, opt_state, key), (losses, mass_errors) = jax.lax.scan(
         step, (params, opt_state, key), jnp.arange(epochs))
-    # One summary per inner solve; diagnostics describe the last training batch.
-    jax.debug.print(
-        "Inner solve ({steps} Adam updates), last batch: loss={loss:.6g} "
-        "grad_norm={grad_norm:.3e} " + TermColours.YELLOW +
-        "margin RMS={mass_rms:.3e}" + TermColours.RESET,
-        steps=epochs, loss=losses[-1], grad_norm=grad_norms[-1],
-        mass_rms=mass_errors[-1], ordered=True)
-    return losses[-1], xi.with_params(params), key
+    result = (losses[-1], xi.with_params(params), key)
+    if return_diagnostics:
+        return (*result, mass_errors.max())
+    return result
 
 def overallPQ(tPs, tQs, n0, n1, n2):
     tP = (n0 * tPs[0] + n1 * tPs[1] + n2 * tPs[2] ) / (n0 + n1 + n2)
@@ -227,7 +230,7 @@ def overallPQ(tPs, tQs, n0, n1, n2):
 def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
                   ng, dev, tau, scale, masks, treat_idcs, years, beta,
                   skiptrain = False, cf = CF.None_, train0 = True, beyond = 0,
-                  bellman_welfare = False, key=None):
+                  bellman_welfare = False, key=None, diagnostics=None):
 
     beta = jnp.asarray(beta, dtype=theta.dtype)
     ts0 = jnp.asarray(years, dtype=theta.dtype)
@@ -235,8 +238,6 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     if beyond > 0:
         ts = jnp.concatenate((ts, ts[-1] + (ts[1] - ts[0]) * jnp.arange(1, beyond + 1)))
 
-
-    print("theta: ", np.asarray(theta))
 
     nT, nty0, nty0 = tMuHat.shape
     maskc, mask0 = masks
@@ -252,8 +253,11 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
 
     if not skiptrain:
         xi = xi.train()
-        loss, xi, key = minimise_inner(xi, theta, beta, transitions, netflow,
-                                      ng, ts, tau, scale, masks, dev, key)
+        loss, xi, key, mass_max = minimise_inner(xi, theta, beta, transitions, netflow,
+                                      ng, ts, tau, scale, masks, dev, key,
+                                      return_diagnostics=True)
+        if diagnostics is not None:
+            diagnostics["max_mass_deviation"] = float(mass_max)
     else:
         loss = jnp.asarray(0.0, dtype=theta.dtype)
 
@@ -322,8 +326,6 @@ def match_moments(xi, theta, tPs, tQs, tMuHat, netflow,
     # Keep the FP32 inner residual, but combine outer scores in host FP64.
     # Mixing a NumPy scalar with a JAX scalar here would demote the sum to FP32.
     total_loss = np.float64(kl_div) + 2.0 * np.float64(loss)
-    print("D_KL: ", kl_div.item(), " inner loss: ", loss.item(), " total loss: ", total_loss.item())
-
     return (total_loss, tMuHat, mu_star, loss,
             (cond_m_hat, cond_m_star, cond_f_hat, cond_f_star),
             (m_hat, m_star, f_hat, f_star),

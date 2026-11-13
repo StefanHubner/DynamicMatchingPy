@@ -12,9 +12,11 @@ to record the exact JAX revision; a branch name alone is not a run identifier.
 - Fresh male/female Dirichlet batches on each update; the advanced random key
   carries into the next Nelder–Mead trial.
 - Annual beta 0.95; historical window 1999–2020, initialized from observed 2001.
-- Historical KL and green diagnostics cover 2001–2020; the initial 2001
+- Historical KL and conditional diagnostics cover 2001–2020; the initial 2001
   contribution is zero. Inner Bellman draws still cover the 1999–2020 grid.
-- Nelder–Mead outer search, simplex increment 0.3, nominal 1,000 iterations.
+- Nelder–Mead outer search, simplex increment 0.3, maximum 1,000 iterations.
+- Stop after 150 outer steps without a strict new global best; `--patience 0`
+  disables this rule. Any finite improvement resets the counter, however small.
 - The November behavior that retains the incumbent score after shrink remains.
 - `--noload` starts coefficients at 0.1 with JAX random key 0. Backend random
   streams and network initialization are not identical to PyTorch.
@@ -92,16 +94,31 @@ python main.py --spec MScal --train --noload
 
 Nelder–Mead is always used for the outer parameters; `--neldermead` is retained
 as a redundant compatibility flag. Adam remains the inner network optimizer.
-Each inner solve prints one summary after all 300 updates, replacing the
-percentage progress lines. It reports loss, gradient norm, and yellow margin
-RMS (the adding-up error) for the last training batch, before its Adam update,
-consistent with the existing returned-loss convention. The margin diagnostic
-excludes rejected draws and does not enter the objective or its gradient.
+The inner solver and individual trial evaluations print nothing. Each outer
+step prints three coordinated lines:
 
-The green conditional-error array and cyan `theta_t` describe the best newly
-evaluated trial in the current outer step. The red `best loss`/`best theta`
-describe the global best so far; these can refer to an earlier trial when the
-current step reports no improvement.
+1. Current total loss in cyan, global best total in green, and current inner
+   residual in cyan, plus the number of outer steps since the last best.
+2. Maximum absolute mass deviation in yellow, over both genders' type margins,
+   all accepted sampled states, all 300 inner updates, and every trial evaluated
+   in this outer step. This includes trials that were not selected as best.
+3. Current parameters in cyan and global-best parameters in green, both shown
+   to three decimal places. Rounding affects display only.
+
+"Current" consistently means the best newly evaluated trial in this outer step.
+The detailed conditional differences appear in grey only when that trial sets
+a new global best. Inner loss still refers to its final training batch before
+the last Adam update. The mass diagnostic observes each batch before its update;
+it is not an additional validation pass and does not enter the objective.
+
+`--patience 150` stops after 150 consecutive outer steps without a strict finite
+improvement, saving the same best parameter/network pair as before. A best at
+step 250 followed by no improvement therefore stops at step 400. This is a
+practical stopping rule, not a convergence certificate: current trial losses
+can rise while Nelder–Mead explores, whereas the saved best is nonincreasing.
+`--patience 0` restores the full 1,000-step run. A step with no finite new trial
+is displayed as `n/a` and cannot overwrite the best; an entirely nonfinite
+first step stops with an error.
 
 Historical KL cell contributions are computed in FP32 and summed in host FP64.
 For MScal, this transfers just 480 FP32 values (1,920 bytes) across both genders
@@ -116,13 +133,16 @@ FP64 scores differed by 1.86e-9; Nelder–Mead retained the lower FP64 score.
 The compiled inner solve contained no FP64 operations and reproduced the
 previous FP32 inner loss. GPU timing has not been benchmarked locally.
 
-The reporting change was checked on a small synthetic MScal problem on CPU:
+The quiet inner solver was checked on a small synthetic MScal problem on CPU:
 the compiled 300-update solve returned exactly the same loss, network weights,
-and random key as before. Instrumenting the actual Dirichlet calls across two
-compiled solves found 1,200 distinct batch keys and distinct observed sample
-vectors (two batches per update). A separate 4,096-draw check, including one
-rejected row, matched the legacy filtered-sample margin RMS formula. These
-checks do not establish convergence of the server estimation.
+and random key as before, with no console output. Its maximum mass deviation
+matched an independent observation of every update (5.25e-6 over the solve,
+versus 1.79e-7 on the last update alone). Separate checks covered aggregation
+across losing trials and reset between outer steps. The outer-loop checks
+covered patience, a 1e-12 improvement resetting it, disabling it, nonfinite
+trials, checkpoint retention, and the coordinated display. An earlier sampling
+audit observed 1,200 distinct Dirichlet batch keys across two compiled solves.
+These checks do not establish convergence of the server estimation.
 
 ## Optional background run and record
 
