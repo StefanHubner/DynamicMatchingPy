@@ -2,7 +2,7 @@
 
 The primal model uses JAX, Equinox layers, Optax Adam for inner training, and
 Nelder–Mead for outer estimation. Dependencies install CPU-only JAX.
-See [Marshall setup and run commands](RUN_JAX.md) for the pinned GPU install,
+See [Marshall setup and run commands](RUN_JAX.md) for the GPU install,
 current experiment settings, and run-provenance recording.
 
 The pre-dual residual construction and 300 inner steps are restored, retaining

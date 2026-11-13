@@ -29,7 +29,7 @@ formula or optimizer setting was changed as part of that fix.
 
 ## Fetch and install
 
-Run on Marshall (Python 3.10 or 3.11):
+Run on Marshall with the existing project venv activated (Python 3.10 or 3.11):
 
 ```bash
 cd ~/DynamicMatchingPy
@@ -37,11 +37,7 @@ git fetch origin
 git switch jax-nelder-mead
 git pull --ff-only
 
-python3 -m venv ~/.venvs/dynamicmatching-jax
-source ~/.venvs/dynamicmatching-jax/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m pip install 'jax[cuda12]==0.6.2'
+python -m pip install -r requirements.txt 'jax[cuda12]>=0.6.2,<0.7'
 python -m pip check
 ```
 
@@ -49,8 +45,22 @@ On the first checkout, `git switch` creates a local branch tracking the unique
 matching remote branch. Preserve local changes if Git reports a conflict;
 these instructions do not discard server work.
 
-The repository requirements install CPU JAX by default. The additional pinned
-CUDA installation enables the NVIDIA GPU without upgrading JAX itself. CUDA 12
+Requirements use minimum versions rather than exact pins. Hub stays below 1
+for compatibility with the existing Transformers 4.51.3 installation; the
+project's loading calls do not require Hub 0.24.6. pandas stays below 3 because
+preprocessing still uses `groupby(axis=1)`. JAX, Optax, and Equinox stay within
+the release families used for this port; newer families can be evaluated
+separately. Record the actual installed versions for each run with `pip freeze`
+(included in the optional launch record below).
+
+If the venv still contains Torch 2.5.1, it also needs a Torch upgrade: its
+cuDNN 9.1 requirement conflicts with JAX's cuDNN >=9.8 requirement. Torch is
+not a dependency of this JAX branch, so the command above does not upgrade it.
+The [official Torch 2.8.0 CUDA 12.8 combination](https://pytorch.org/get-started/previous-versions/#v280)
+(`torch` 2.8.0, `torchvision` 0.23.0, `torchaudio` 2.8.0) uses compatible cuDNN.
+
+The repository requirements install CPU JAX by default. The CUDA extra enables
+the NVIDIA GPU within the same JAX release family. CUDA 12
 requires a sufficiently recent NVIDIA driver (Linux driver >=525). See
 [JAX installation instructions](https://docs.jax.dev/en/latest/installation.html#nvidia-gpu).
 If local CUDA paths conflict with pip's bundled libraries, consult that page
@@ -59,17 +69,27 @@ before changing the environment.
 Confirm the backend and dataset access:
 
 ```bash
-JAX_PLATFORMS=cuda python -c 'import jax; print(jax.__version__); print(jax.devices())'
+python -c 'import jax; print(jax.__version__); print(jax.devices())'
 python -c 'from datasets import load_dataset; d=load_dataset("StefanHubner/DivorceData", token=True); print(d["MS"].num_rows)'
 test -d hfdd
 ```
 
 `hfdd` should be the existing model-output directory or valid symlink. The
 cached Hugging Face login/HF_TOKEN used by the legacy run is still required.
-The CUDA-only backend selection prevents silent CPU fallback. CPU execution
-can instead use `JAX_PLATFORMS=cpu` and omit the CUDA installation.
+Training selects JAX's default device automatically: GPU when available,
+otherwise CPU. No `JAX_PLATFORMS` setting is needed. The device check above
+shows which backend is available before starting a long run.
 
-## Launch and keep a record
+## Launch
+
+```bash
+python main.py --spec MScal --train --noload
+```
+
+Nelder–Mead is always used for the outer parameters; `--neldermead` is retained
+as a redundant compatibility flag. Adam remains the inner network optimizer.
+
+## Optional background run and record
 
 ```bash
 mkdir -p logs
@@ -77,9 +97,9 @@ run_id=$(date -u +%Y%m%dT%H%M%SZ)
 git rev-parse HEAD > "logs/${run_id}_MScal.commit.txt"
 git diff --no-ext-diff > "logs/${run_id}_MScal.worktree.patch"
 python -m pip freeze > "logs/${run_id}_MScal.packages.txt"
-JAX_PLATFORMS=cuda python -c 'import jax; print(jax.__version__); print(jax.devices())' > "logs/${run_id}_MScal.devices.txt"
-printf '%s\n' 'JAX_PLATFORMS=cuda python -u main.py --spec MScal --train --noload --neldermead' > "logs/${run_id}_MScal.command.txt"
-nohup env JAX_PLATFORMS=cuda python -u main.py --spec MScal --train --noload --neldermead > "logs/${run_id}_MScal.log" 2>&1 < /dev/null &
+python -c 'import jax; print(jax.__version__); print(jax.devices())' > "logs/${run_id}_MScal.devices.txt"
+printf '%s\n' 'python -u main.py --spec MScal --train --noload' > "logs/${run_id}_MScal.command.txt"
+nohup python -u main.py --spec MScal --train --noload > "logs/${run_id}_MScal.log" 2>&1 < /dev/null &
 echo $! > "logs/${run_id}_MScal.pid"
 tail -f "logs/${run_id}_MScal.log"
 ```
