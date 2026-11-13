@@ -12,8 +12,8 @@ from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 
 from dynamicmatching import create_closure, create_netflow, overallPQ
-from dynamicmatching import tauMcal, tauMS, tauMStri, tauMScal, tauMStrend, tauKMS, masksM, masksMS, masksKMS, TermColours, CF
-from dynamicmatching import scaleMcal, scaleMScal, scaleMScaltrend, tauMScaltrend
+from dynamicmatching import tauMS, tauMScal, tauMScaltrend
+from dynamicmatching import scaleMScal, scaleMScaltrend, masksMS, CF
 from dynamicmatching import matched_process_plot, plot_cf_grid, plot_estimator_grid, plot_margin_counterfactuals
 from dynamicmatching import SinkhornGeneric
 from dynamicmatching import NelderMeadOptimizer
@@ -52,56 +52,32 @@ def main(train = False, noload = False,
     key, network_key = jax.random.split(jax.random.key(0))
 
     # Define specification and load appropriate dataset
-    # outdim = par dim + # of single types + value vct
-    # (name, state dim, net class, masks, basis, par dim, ys, train0, name)
+    # outdim = network coefficient count + # of single types + value vct
+    # (data, state dim, masks, surplus, scales, par dim, initial pars, years, train0)
     current = args.spec
-    tpl = lambda a: (a, a)
-    scale1 = lambda d: lambda _, dev: tpl(jnp.ones(d, dtype=jnp.float32))
+    repar = lambda f, g: lambda p, *a: f(g(p), *a)
+    psi = tauMScal(jnp.zeros(7), 0, 1, dev)
+    psi = psi[jnp.array([1, 2, 2, 1]), jnp.array([1, 2, 1, 2])]
 
-    spec  = { "Mcal1":
-                ("M", 2, masksM, tauMcal, scale1(2), 2, None,
-                 range(1999, 2021), False),
-              "Mcal":
-                ("M", 2, masksM, tauMcal, scaleMcal, 2+1, None,
-                 range(1999, 2021), False),
-              "MS":
-                ("MS", 3, masksMS, tauMS, scale1(3), 10, None,
-                 range(1999, 2021), False),
-              "MStrend":
-                ("MS", 3, masksMS, tauMStrend, scale1(3), 14, None,
-                 range(1999, 2021), False),
-              "MScal1":
-                ("MS", 3, masksMS, tauMScal, scale1(3), 5, None,
+    spec  = { "MS":
+                ("MS", 3, masksMS,
+                 repar(tauMS, lambda p: jnp.concatenate((p[:5], jnp.zeros_like(p[:1]), p[7:]))),
+                 repar(scaleMScal, lambda p: p[:7]), 11,
+                 jnp.concatenate((jnp.full(7, 0.1), psi)),
                  range(1999, 2021), False),
               "MScal":
                 # 2026-10-02: One fixed reference scale leaves two estimated type scales.
                 ("MS", 3, masksMS, tauMScal, scaleMScal, 5+2, None,
                  range(1999, 2021), False),
-              "MScalold":
-                # 2026-10-02: Retain the legacy eight-parameter model with three free scales.
-                ("MS", 3, masksMS, tauMScal,
-                 lambda par, dev: tpl(jnp.exp(par[5:])), 5+3, None,
-                 range(1999, 2021), False),
               "MScaltrend":
                 # 2026-10-06: Fresh coefficients and zero initial slopes; all trends remain free.
                 ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2,
                  5 * [0.1] + 5 * [0.0] + 2 * [0.1],
-                 range(1999, 2021), False),
-              "MScaltrend2":
-                ("MS", 3, masksMS, tauMScaltrend, scaleMScaltrend, 10+2, None,
-                 range(1999, 2021), False),
-              "MStri":
-                ("MS", 3, masksMS, tauMStri, scale1(3), 8, None,
-                 range(1999, 2021), False),
-              "KMS":
-                ("KMS", 8, masksKMS, tauKMS, scale1(8), 12, None,
-                 range(1999, 2021), False),
-              "KMSclosed":
-                ("KMS", 8, masksKMS, tauKMS, scale1(8), 12, None,
                  range(1999, 2021), False)
              }[current]
     vars, ndim, (maskc, mask0), tau, scale, thetadim, theta0, years, train0 = spec
-    outdim = thetadim + 2 * ndim + 1
+    net_tau, netdim = {"MS": (tauMScal, 7)}.get(current, (tau, thetadim))
+    outdim = netdim + 2 * ndim + 1
     tPs, tQs, tMuHat, ee = load_data(vars, dev)
     treat_idcs = [i for i, t in enumerate(years) if 2001 <= t <= 2008]
     fixedflows = False
@@ -114,9 +90,7 @@ def main(train = False, noload = False,
         repo = "StefanHubner/DutchDivorce"
         f = lambda n: hf_hub_download(
             repo_id = repo,
-            filename = n + ("MScal" if current == "MScalold" else current) + (".eqx" if n == "xi" else ".npz"),
-            # 2026-10-02: Pin legacy files so future MScal checkpoints cannot replace them.
-            revision = "ba7727a7e639833895967f9fa4241b385bbcde91" if current == "MScalold" else None,
+            filename = n + current + (".eqx" if n == "xi" else ".npz"),
             cache_dir = ".hfcache"
         )
         with np.load(f("theta")) as checkpoint:
@@ -125,7 +99,7 @@ def main(train = False, noload = False,
         theta0 = thetadim * [0.1] if theta0 is None else theta0
         theta = jax.device_put(jnp.asarray(theta0, dtype=jnp.float32), dev)
 
-    network = SinkhornGeneric(tau, ndim, outdim, thetadim, key=network_key)
+    network = SinkhornGeneric(net_tau, ndim, outdim, netdim, key=network_key)
     if load:
         network = eqx.tree_deserialise_leaves(f("xi"), network)
     xi = network.with_params(jax.device_put(network.params, dev))
