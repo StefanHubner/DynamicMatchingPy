@@ -3,7 +3,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
-import torch
+import jax.numpy as jnp
+import numpy as np
 
 from .bellman import choices, conditional_kl_loss, match_moments
 from .graphs import create_heatmap
@@ -52,27 +53,47 @@ SANDBOX_LAYOUTS = {
                   "cw0": (2, 3), "0cw": (3, 2)},
         "couples": ["uu", "chch", "chcw", "cwch", "cwcw"],
         "singles": ["u0", "0u", "ch0", "0ch", "cw0", "0cw"]
+    },
+    "KMS": {
+        "hdmu": ['vuy', 'vuo', 'vcy', 'vco', 'kuh', 'kuw', 'kch', 'kcw', '0'],
+        "hds": ['M_{vuy}', 'M_{vuo}', 'M_{vcy}', 'M_{vco}',
+                'M_{kuh}', 'M_{kuw}', 'M_{kch}', 'M_{kcw}',
+                'F_{vuy}', 'F_{vuo}', 'F_{vcy}', 'F_{vco}',
+                'F_{kuh}', 'F_{kuw}', 'F_{kch}', 'F_{kcw}', 't', 'd'],
+        "cells": {"vuyvuy": (0, 0), "vuovuo": (1, 1),
+                  "vchvch": (2, 2), "vcwvcw": (3, 3),
+                  "kuykuy": (4, 4), "kuokuo": (5, 5),
+                  "kuokuy": (5, 4), "kchkch": (6, 6),
+                  "kcwkcw": (7, 7), "kcwkch": (7, 6),
+                  "vuy0": (0, 8), "0vuy": (8, 0),
+                  "vuo0": (1, 8), "0vuo": (8, 1),
+                  "vch0": (2, 8), "0vch": (8, 2),
+                  "vcw0": (3, 8), "0vcw": (8, 3),
+                  "kuy0": (4, 8), "0kuy": (8, 4),
+                  "kuo0": (5, 8), "0kuo": (8, 5),
+                  "kch0": (6, 8), "0kch": (8, 6),
+                  "kcw0": (7, 8), "0kcw": (8, 7)},
+        "couples": ["vuyvuy", "vuvouo", "vchvch", "vcwvcw", "vcwvch",
+                    "kuykuy", "kukouo", "kchkch", "kcwkcw", "kcwkch"],
+        "singles": ["vuy0", "0vuy", "vuo0", "0vuo", "vch0", "0vch", "vcw0", "0vcw",
+                    "kuy0", "0kuy", "kuo0", "0kuo", "kch0", "0kch", "kcw0", "0kcw"]
     }
 }
 
 
 def discounted_welfare(flows, horizon, beta):
     """Sum each year's next horizon flow payoffs, including that year."""
-    if not torch.isfinite(flows).all():
-        raise ValueError("Non-finite flow welfare in the extended rollout.")
     # 2026-10-22: Discount simulated flows at the model's annual beta, without an NN terminal value.
-    weights = beta ** torch.arange(horizon, dtype=torch.float64, device=flows.device)
-    return (flows.unfold(0, horizon, 1).double() * weights).sum(-1)
+    weights = beta ** np.arange(horizon, dtype=np.float64)
+    windows = np.lib.stride_tricks.sliding_window_view(np.asarray(flows), horizon, axis=0)
+    return (windows.astype(np.float64) * weights).sum(-1)
 
 
-@torch.no_grad()
 def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
              scale, masks, tis, years, cf, train0, beyond, beta,
              bellman_welfare=False, welfare_horizon=0):
-    if welfare_horizon < 0 or (bellman_welfare and welfare_horizon):
-        raise ValueError("Choose NN welfare or a nonnegative discounted-flow horizon.")
     tail = max(welfare_horizon - 1, 0)
-    _, muh1, mus, _, conds, margs, vs, individual = match_moments(xi, theta,
+    _, muh1, mus, _, conds, margs, vs, *_ = match_moments(xi, theta,
                                         tPs, tQs, muh, netflow, ng,
                                         dev, tau, scale, masks, tis, years,
                                         skiptrain = True, cf = cf,
@@ -81,18 +102,17 @@ def load_mus(xi, theta, tPs, tQs, muh, netflow, ng, dev, tau,
     if welfare_horizon:
         start, stop = (0 if train0 else tis[0]), len(muh) + beyond
         mus = mus[:stop]
-        individual = tuple(values[:stop] for values in individual)
         vs = discounted_welfare(vs, welfare_horizon, beta)
         vs[:start] = 0
         matched = conditional_kl_loss(muh[start:] if beyond == 0 else mus[start:],
                                       mus[start:], masks)
         conds, margs = matched[1:5], matched[5:]
-    return muh1, mus, conds, margs, vs, individual
+    return muh1, mus, conds, margs, vs
 
 
 def _series_columns(scenario, sex, estimator, tensor, states):
     return {(scenario, sex, estimator, label):
-            tensor[(slice(None),) + indices].flatten().detach().numpy()
+            np.asarray(tensor[(slice(None),) + indices]).flatten()
             for label, indices in states}
 
 
@@ -103,12 +123,11 @@ def _plot_frame(series, labels):
 
 
 def prepare_plot_frames(results, years, treat_idcs, train0, beyond):
-    """Turn the scenario outputs into the tables used by the paper plots."""
-    columns = {name: {} for name in ("conditional", "marginal", "joint", "welfare",
-                                    "individual_welfare")}
+    """Turn the scenario outputs into the four tables used by the paper plots."""
+    columns = {name: {} for name in ("conditional", "marginal", "joint", "welfare")}
     start = 0 if train0 else treat_idcs[0]
     labels = [str(year) for year in range(years.start + start, years.stop + beyond)]
-    for scenario, (_, mu_star, conditional, marginal, welfare, individual) in results.items():
+    for scenario, (_, mu_star, conditional, marginal, welfare) in results.items():
         ndim = mu_star.shape[1] - 1
         for name, tensors, states in (("conditional", conditional, CONDITIONAL_STATES[ndim]),
                                       ("marginal", marginal, MARGINAL_STATES[ndim])):
@@ -118,17 +137,12 @@ def prepare_plot_frames(results, years, treat_idcs, train0, beyond):
                                                mu_star[start:], JOINT_STATES[ndim]))
         columns["welfare"].update(_series_columns(scenario, "both", "star",
                                                  welfare[start:], [("Welfare", (0,))]))
-        # 2026-11-03: Report type values without population weights or allocating the fixed-flow term J.
-        wm, wf, _ = individual
-        for sex, values in (("M", wm), ("F", wf)):
-            columns["individual_welfare"].update(_series_columns(
-                scenario, sex, "star", values[start:], MARGINAL_STATES[ndim]))
 
     return {name: _plot_frame(series, labels) for name, series in columns.items()}
 
 
 def prepare_fit_frame(result, years, treat_idcs, train0, masks):
-    mu_hat, mu_star, _, _, _, _ = result
+    mu_hat, mu_star, _, _, _ = result
     start = 0 if train0 else treat_idcs[0]
     # 2026-10-12: Compare historical observed and model matches, excluding forecast alignment copies.
     conditional = conditional_kl_loss(mu_hat[start:], mu_star[start:len(mu_hat)], masks)[1:5]
@@ -155,11 +169,11 @@ def sandbox_controls(spec, years):
     """Build the existing sidebar controls and expose its state and labels."""
     s = st.session_state
     if 'currentyear' not in s: s.currentyear = years[0]
-    if 't' not in s: s.t = torch.tensor(0.0).view(1, 1)
+    if 't' not in s: s.t = jnp.array(0.0).reshape(1, 1)
     dt = 1.0 / (years[-1] - years[0])
 
     def update_year():
-        s.t = torch.tensor((s.currentyear - years[0]) * dt).view(1, 1)
+        s.t = jnp.array((s.currentyear - years[0]) * dt).reshape(1, 1)
 
     st.sidebar.slider('Year', years[0], years[-1], step=1,
                       key='currentyear', on_change=update_year)
@@ -175,7 +189,7 @@ def sandbox_controls(spec, years):
     update_c()
 
     if spec == "M":
-        ss = lambda d: torch.tensor([[s.mu, s.mc, s.vu, s.vc, s.t, d]], device="cpu")
+        ss = lambda d: jnp.array([[s.mu, s.mc, s.vu, s.vc, float(s.t.item()), d]])
 
     if spec == "MS":
         for key in ('mhc', 'vhc'):
@@ -190,10 +204,10 @@ def sandbox_controls(spec, years):
             st.sidebar.slider(label, 0.0, 1.0, step=0.01, key=key, on_change=callback)
             callback()
 
-        ss = lambda d: torch.tensor([[
+        ss = lambda d: jnp.array([[
                            s.mu, s.mc * s.mhc, s.mc * (1 - s.mhc),
                            s.vu, s.vc * s.vhc, s.vc * (1 - s.vhc),
-                           s.t, d]], device="cpu")
+                           float(s.t.item()), d]])
 
     return dict(SANDBOX_LAYOUTS[spec], ss=ss, t=s.t)
 
@@ -202,26 +216,26 @@ def show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt):
     ss, t = controls["ss"], controls["t"]
     hdmu, hds = controls["hdmu"], controls["hds"]
     _, _, tP0, tQ0, tP1, tQ1 = transitions
-    torch0 = torch.tensor(0.0, device="cpu").view(1, 1)
+    zero = jnp.array(0.0).reshape(1, 1)
     matches, values, next_states = [], [], []
-    for regime, d in enumerate((torch0, torch0 + 1)):
-        mus, v, _, _, _ = xi(ss(regime))
+    for regime, d in enumerate((zero, zero + 1)):
+        mus, v = xi(ss(regime))
         matches.append(mus)
         values.append(v)
         next_states.append(choices(matches[0], t, d, tP0, tQ0, tP1, tQ1, netflow, dt, "cpu"))
 
-    ps = theta.detach().numpy()
+    ps = np.asarray(theta)
     st.write("Parameters: " + ", ".join(["{:.2f}".format(p) for p in ps]))
     cols = st.columns(2)
-    for col, d in zip(cols, [torch0, torch0 + 1]):
+    for col, d in zip(cols, [zero, zero + 1]):
         with col:
             st.subheader('$\\Phi_{{t}}({})$'.format(int(d.item())))
-            st.dataframe(pd.DataFrame(tau(theta, t, d, "cpu").detach().numpy(),
+            st.dataframe(pd.DataFrame(np.asarray(tau(theta, t, d, "cpu")),
                                       index=hdmu, columns=hdmu))
 
     st.subheader('$\\mu_1$ in %')
-    fmarg = ss(1)[0, ndim:2*ndim].detach().numpy().tolist()
-    mmarg = ss(1)[0, 0:ndim].detach().numpy().tolist()
+    fmarg = np.asarray(ss(1)[0, ndim:2*ndim]).tolist()
+    mmarg = np.asarray(ss(1)[0, 0:ndim]).tolist()
     fig = create_heatmap(matches[1][0]*100,
                          ["{:.1f}".format(f*100) for f in fmarg + [0]],
                          ["{:.1f}".format(m*100) for m in mmarg + [0]], hdmu)
@@ -232,9 +246,9 @@ def show_sandbox(xi, theta, tau, ndim, controls, transitions, netflow, dt):
     for col, ssnext, v in zip(cols, next_states, values):
         with col:
             st.subheader('($M_{{t+1}}^*, F_{{t+1}}^*) $')
-            st.dataframe(pd.DataFrame(ssnext.detach().numpy(), columns=hds), hide_index=True)
+            st.dataframe(pd.DataFrame(np.asarray(ssnext), columns=hds), hide_index=True)
             st.subheader('$V$')
-            st.write(v.detach().numpy())
+            st.write(np.asarray(v))
 
 
 def show_raw_matches(mu_hat, mu_star, years, labels):
@@ -244,8 +258,8 @@ def show_raw_matches(mu_hat, mu_star, years, labels):
             st.header(title)
             for i in range(mu.shape[0]):
                 st.subheader("{}".format(years[i]))
-                st.dataframe(pd.DataFrame(mu[i].detach().numpy(), columns=labels, index=labels))
+                st.dataframe(pd.DataFrame(np.asarray(mu[i]), columns=labels, index=labels))
                 st.dataframe(pd.DataFrame({
-                    'M': mu[i, :-1, :].sum(axis=1).detach().numpy(),
-                    'F': mu[i, :, :-1].sum(axis=0).detach().numpy()
+                    'M': np.asarray(mu[i, :-1, :].sum(axis=1)),
+                    'F': np.asarray(mu[i, :, :-1].sum(axis=0))
                 }, index=labels[:-1]))

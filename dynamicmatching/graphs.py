@@ -3,6 +3,7 @@ from functools import partial
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+import numpy as np
 
 
 SCENARIO_COLOURS = {"CFF": "#C44E52", "CF0": "#C44E52", "CF1": "#55A868"}
@@ -15,8 +16,8 @@ def matched_process_plot(mu_hat, mu_star, years, cells, couples, singles,
     cls = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'orange']
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(3.5, 7), dpi = 500)
-    muh = mu_hat.cpu().detach().numpy()
-    mus = mu_star.cpu().detach().numpy()
+    muh = np.asarray(mu_hat)
+    mus = np.asarray(mu_star)
 
     def plot_cells(ax, cell_group):
         handles, labels = [], []
@@ -46,7 +47,7 @@ def matched_process_plot(mu_hat, mu_star, years, cells, couples, singles,
     return fig, ax1, ax2
 
 def create_heatmap(tensor, x2lab, y2lab, ticklabs):
-    data = tensor.detach().cpu().numpy()
+    data = np.asarray(tensor)
     fig, ax = plt.subplots(figsize=(3, 3), dpi=500)
     
     # Create the heatmap
@@ -145,18 +146,6 @@ def plot_cf_grid(df, sex, dim=(4, 2), beyond=0, pymin=0,
     # 2026-10-12: Share grid formatting and the solid/forecast line renderer.
     draw = partial(_plot_series, level="scenario", beyond=beyond, forecast_start=forecast_start)
     fig = _plot_grid(selected, panels, draw, dim, figsize, sharex=(nrows > 1), pymin=pymin)
-    return fig, selected
-
-
-def plot_individual_welfare(df, sex, beyond=0, forecast_start=None):
-    # 2026-11-03: Reuse counterfactual grids while allowing signed individual dual values.
-    ndim = len(df.columns.get_level_values("state").unique())
-    fig, selected = plot_cf_grid(df, sex, dim=(1, ndim), beyond=beyond,
-                                 pymin=None, forecast_start=forecast_start)
-    fig.suptitle({"M": "Male", "F": "Female"}[sex] + " individual welfare")
-    for ax in fig.axes:
-        ax.set_ylabel("Individual welfare")
-    fig.tight_layout()
     return fig, selected
 
 

@@ -12,3 +12,10 @@ hfdd
 *.pkl
 *.pdf
 *.csv
+
+/output/
+/tmp/
+__pycache__/
+*.py[cod]
+/tests/
+/logs/

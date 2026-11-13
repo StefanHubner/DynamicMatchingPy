@@ -1,4 +1,4 @@
-import torch
+import jax.numpy as jnp
 import numpy as np
 
 class NelderMeadOptimizer:
@@ -10,7 +10,7 @@ class NelderMeadOptimizer:
         self.sigma = sigma  # shrink
 
         # Flatten parameters
-        self.shape_info = [(p.shape, p.numel()) for p in self.param_groups[0]['params']]
+        self.shape_info = [(p.shape, p.size) for p in self.param_groups[0]['params']]
         self.dim = sum(s[1] for s in self.shape_info)
 
         # Initialize simplex
@@ -23,20 +23,19 @@ class NelderMeadOptimizer:
 
         # Create simplex vertices
         for i in range(self.dim):
-            x = x0.clone()
-            x[i] += lr
+            x = x0.at[i].add(lr)
             self.simplex.append(x)
 
     def zero_grad(self):
         pass
 
     def _flatten_params(self):
-        return torch.cat([p.view(-1) for p in self.param_groups[0]['params']])
+        return jnp.concatenate([p.reshape(-1) for p in self.param_groups[0]['params']])
 
     def _unflatten_params(self, x):
         offset = 0
-        for p, (shape, numel) in zip(self.param_groups[0]['params'], self.shape_info):
-            p.data = x[offset:offset+numel].view(shape)
+        for i, (shape, numel) in enumerate(self.shape_info):
+            self.param_groups[0]['params'][i] = x[offset:offset+numel].reshape(shape)
             offset += numel
 
     def step(self, closure):
@@ -45,24 +44,21 @@ class NelderMeadOptimizer:
             # 2026-11-10: A shrink changes only the other vertices; retain the best score.
             for x in self.simplex[len(self.f_values):]:
                 self._unflatten_params(x)
-                loss = closure()
-                self.f_values.append(loss.item() if torch.is_tensor(loss) else loss)
-            if not np.isfinite(self.f_values).any():
-                raise ValueError("Nelder-Mead requires at least one finite initial loss.")
-
+                loss = closure(x)
+                self.f_values.append(float(loss))
         # Sort vertices
         indices = np.argsort(self.f_values)
         self.simplex = [self.simplex[i] for i in indices]
         self.f_values = [self.f_values[i] for i in indices]
 
         # Calculate centroid (excluding worst point)
-        centroid = torch.stack(self.simplex[:-1]).mean(dim=0)
+        centroid = jnp.stack(self.simplex[:-1]).mean(axis=0)
 
         # Reflection
         worst = self.simplex[-1]
         reflected = centroid + self.alpha * (centroid - worst)
         self._unflatten_params(reflected)
-        f_reflected = closure().item()
+        f_reflected = float(closure(reflected))
 
         if self.f_values[0] <= f_reflected < self.f_values[-2]:
             self.simplex[-1] = reflected
@@ -71,7 +67,7 @@ class NelderMeadOptimizer:
             # Expansion
             expanded = centroid + self.gamma * (reflected - centroid)
             self._unflatten_params(expanded)
-            f_expanded = closure().item()
+            f_expanded = float(closure(expanded))
 
             if f_expanded < f_reflected:
                 self.simplex[-1] = expanded
@@ -83,7 +79,7 @@ class NelderMeadOptimizer:
             # Contraction
             contracted = centroid + self.rho * (worst - centroid)
             self._unflatten_params(contracted)
-            f_contracted = closure().item()
+            f_contracted = float(closure(contracted))
 
             if f_contracted < self.f_values[-1]:
                 self.simplex[-1] = contracted
@@ -97,4 +93,4 @@ class NelderMeadOptimizer:
         # Set parameters to best vertex
         self._unflatten_params(self.simplex[0])
 
-        return torch.tensor(self.f_values[0])
+        return jnp.asarray(self.f_values[0])
